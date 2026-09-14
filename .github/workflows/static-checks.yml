@@ -27,6 +27,11 @@ jobs:
         run: |
           & .\tests\PowerPolicyTests.ps1
 
+      - name: Run policy transaction tests
+        shell: powershell
+        run: |
+          & .\tests\PolicyTransactionTests.ps1
+
       - name: Run hosted Windows non-mutating E2E
         shell: powershell
         run: |
