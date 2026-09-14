@@ -235,11 +235,12 @@ function Sync-WnsRuntimePolicyProtection {
     }
 
     if ($status.Status -eq 'None') {
+        $started = Start-WnsRuntimePolicyProtection -Paths $Paths -Settings $Settings -HasBattery $HasBattery
         return [pscustomobject][ordered]@{
-            Rebound = $false
-            Active = $false
-            ChangeCount = 0
-            Reason = 'No temporary policy transaction is active.'
+            Rebound = [bool]$started.Active
+            Active = [bool]$started.Active
+            ChangeCount = [int]$started.ChangeCount
+            Reason = if ($started.Active) { 'Temporary runtime policy was initialized.' } else { 'No temporary policy change is required.' }
         }
     }
 
