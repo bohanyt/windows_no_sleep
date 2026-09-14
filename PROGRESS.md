@@ -1,10 +1,43 @@
 # PROGRESS
 
+## [2026-09-14] P2 Dispatch 001 ready — physical read-only probe only
+- Phase: **P2 — physical Windows integration, read-only gate**.
+- Control Tower issue: `#1`.
+- DRAFT PR: `#2` on `feat/v1-portable-tray`.
+- Exact implementation SHA authorized for the first local probe: `63ea8c99bd90b5416d00d6bec827a8b9e27b8218`.
+- Added and hardened `tools/LocalWindowsVerification.ps1`:
+  - default mode is `Probe`, which reads capability/policy state and writes evidence JSON only;
+  - mutation mode is separately gated by `ApplyRestoreSmoke` + an explicit acknowledgement switch and is **not authorized by Dispatch 001**;
+  - probe captures active scheme, lid AC/DC, sleep-idle AC/DC, critical-battery level, AC/battery status, `powercfg /a`, and `powercfg /requests` result;
+  - local evidence is written only under ignored `artifacts/local-verification/`;
+  - mutation-mode cleanup was hardened so restore errors do not prevent evidence capture and null/unreadable after-state fails closed;
+  - all PowerShell source/tests/tools are now parser-checked under Windows PowerShell 5.1 CI.
+- Hosted evidence for exact SHA `63ea8c99bd90b5416d00d6bec827a8b9e27b8218` is green:
+  - StaticTests: PASS;
+  - read-only PowerPolicyTests: PASS;
+  - PolicyTransactionTests: PASS;
+  - hosted non-mutating Windows E2E: PASS.
+- Local authority: `docs/LOCAL_DISPATCH_001.md`.
+- Local Cursor executor status: **DISPATCH READY — PROBE ONLY**.
+- Explicitly not authorized yet:
+  - `ApplyRestoreSmoke`;
+  - any lid/sleep power-policy write;
+  - lid-close physical test;
+  - unplugging AC / battery-discharge test;
+  - Sleep/Hibernate/Restart/Shutdown test;
+  - admin elevation or execution-policy/EDR bypass;
+  - local source edits, commits, or pushes.
+- Next:
+  1. owner relays Dispatch 001 to the local Cursor executor;
+  2. executor runs the exact read-only probe at exact SHA and returns evidence;
+  3. Control Tower reviews the real laptop snapshot;
+  4. only then may a separate Dispatch 002 authorize a short apply/verify/exact-restore smoke.
+
 ## [2026-09-14] P1/P2 boundary reached: hosted Windows E2E + recovery transaction green
 - Phase: **P1 source-safe core substantially complete; entering P2 physical Windows integration gate**.
 - Control Tower issue: `#1`.
 - DRAFT PR: `#2` on `feat/v1-portable-tray`.
-- Verified implementation head: `af2d807d9966605b221a390885fe5f9d94bcf3d9`.
+- Verified implementation head at this entry: `af2d807d9966605b221a390885fe5f9d94bcf3d9`.
 - New implementation/evidence since the prior entry:
   - full tray process now launches under **Windows PowerShell 5.1** on a hosted Windows Server 2025 runner and reaches `PROTECTED`;
   - `PowerCreateRequest` / `PowerSetRequest(SystemRequired)` succeeds in the real hosted process;
@@ -27,17 +60,10 @@
 - Important safety state:
   - the real tray app still does **not** apply lid/DC power-plan mutations;
   - lid control remains visibly not claimed as completed in the dev UI;
-  - no physical laptop setting has been changed by this Control Tower;
-  - local Cursor executor has still not been dispatched.
+  - no physical laptop setting has been changed by this Control Tower.
 - Why the next gate needs the physical Windows 11 laptop:
-  - hosted runners cannot prove Modern Standby S0 behavior, real lid-close behavior, real AC/DC transitions, battery discharge/safety, headless/display-disconnect behavior, or SentinelOne acceptance;
-  - the next mutation proof must test actual `PowerWrite*ValueIndex` + exact restore on the known Windows 11 25H2 laptop under a bounded recovery-first procedure.
-- Next:
-  1. prepare one safety-bounded local verification harness/dispatch against this exact implementation lineage;
-  2. first local pass is read-only capability/snapshot evidence;
-  3. only after snapshot evidence, run a short apply/verify/restore smoke for lid/DC values with automatic `finally` restore;
-  4. do not perform a long closed-lid/Modern-Standby soak until apply+restore proof is clean;
-  5. keep PR #2 draft until physical Windows and EDR gates are satisfied.
+  - hosted runners cannot prove Modern Standby S0 behavior, real lid-close behavior, real AC/DC transitions, battery discharge/safety, headless/display-disconnect behavior, or SentinelOne acceptance.
+- Next: superseded by Dispatch 001 above.
 
 ## [2026-09-14] P1 source-safe implementation started; first CI green
 - Phase: **P1 — source-safe core**.
@@ -63,7 +89,7 @@
   - no SentinelOne/EDR verification;
   - no claim of defeating forced Windows Update restarts.
 - Local Cursor executor status at this entry: **WAIT / not dispatched**.
-- Next: superseded by the hosted-E2E/transaction entry above.
+- Next: superseded by the later entries above.
 
 ## [2026-09-14] V1 product direction approved; GitHub Control Tower established
 - Phase at this entry: **P0 — Authority and plan**.
