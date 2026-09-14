@@ -1,8 +1,10 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.Core.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.PowerPolicy.psm1') -Force
+# Nested modules must not force-reload dependencies because Windows PowerShell
+# 5.1 can remove commands that were already imported into the caller's scope.
+Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.Core.psm1')
+Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.PowerPolicy.psm1')
 
 function New-WnsDefaultPolicyApplyAction {
     [CmdletBinding()]
