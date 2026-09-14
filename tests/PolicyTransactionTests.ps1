@@ -37,7 +37,9 @@ function New-FakeChange {
 }
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$corePath = Join-Path $repoRoot 'src\WindowsNoSleep.Core.psm1'
 $transactionPath = Join-Path $repoRoot 'src\WindowsNoSleep.PolicyTransaction.psm1'
+Import-Module $corePath -Force
 Import-Module $transactionPath -Force
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('WindowsNoSleep.TransactionTests.' + [Guid]::NewGuid().ToString('N'))
