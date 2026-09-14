@@ -1,9 +1,11 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.Core.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.PowerPolicy.psm1') -Force
-Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.PolicyTransaction.psm1') -Force
+# Keep dependency imports scoped without Force so caller-visible commands are not
+# evicted on Windows PowerShell 5.1 when this module is loaded after Core.
+Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.Core.psm1')
+Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.PowerPolicy.psm1')
+Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.PolicyTransaction.psm1')
 
 function New-WnsRuntimePolicyPlanFromValues {
     [CmdletBinding()]
