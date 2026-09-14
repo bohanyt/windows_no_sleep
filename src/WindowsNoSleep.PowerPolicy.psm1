@@ -280,6 +280,13 @@ function Set-WnsPowerPolicyChange {
     $dc = if ($RestoreOriginal) { [uint32]$Change.OriginalDC } else { [uint32]$Change.TargetDC }
     $verb = if ($RestoreOriginal) { 'restore' } else { 'apply temporary override to' }
 
+    if (-not $RestoreOriginal) {
+        $activeBefore = Get-WnsActivePowerSchemeGuid
+        if ($activeBefore -ne $scheme) {
+            throw "Refusing temporary power-policy mutation because active scheme changed from snapshot $scheme to $activeBefore."
+        }
+    }
+
     if ($PSCmdlet.ShouldProcess("$($Change.Name) in scheme $scheme", $verb)) {
         if ([bool]$Change.ApplyAC) {
             [WindowsNoSleep.PowerPolicy.Native]::WriteAc($scheme, $subgroup, $setting, $ac)
@@ -288,10 +295,17 @@ function Set-WnsPowerPolicyChange {
             [WindowsNoSleep.PowerPolicy.Native]::WriteDc($scheme, $subgroup, $setting, $dc)
         }
 
-        # Microsoft documents that writes to an active scheme do not take effect
-        # until PowerSetActiveScheme is called. Re-activating the same scheme does
-        # not switch plans; it commits the changed values for that scheme.
-        [WindowsNoSleep.PowerPolicy.Native]::Activate($scheme)
+        # PowerSetActiveScheme is required to apply writes to the active scheme,
+        # but it must never switch the user back to a plan they changed to while
+        # Windows No Sleep was running. Restoration may safely write values back
+        # into the old (now inactive) scheme without activating it.
+        $activeAfterWrite = Get-WnsActivePowerSchemeGuid
+        if ($activeAfterWrite -eq $scheme) {
+            [WindowsNoSleep.PowerPolicy.Native]::Activate($scheme)
+        }
+        elseif (-not $RestoreOriginal) {
+            throw "Active power scheme changed during temporary override; values were written only to snapshot scheme $scheme and it was not re-activated."
+        }
     }
 }
 
