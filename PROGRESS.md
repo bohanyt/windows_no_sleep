@@ -1,7 +1,38 @@
 # PROGRESS
 
+## [2026-09-14] P1 source-safe implementation started; first CI green
+- Phase: **P1 — source-safe core**.
+- Control Tower issue: `#1`.
+- Implementation branch: `feat/v1-portable-tray`.
+- DRAFT PR: `#2`.
+- Current implementation head: `329f161f1160d54b415d25f3c1a47b72689b23a9`.
+- Added on the implementation branch:
+  - `WindowsNoSleep.cmd` quiet double-click launcher using built-in Windows PowerShell 5.1;
+  - `WindowsNoSleep.ps1` tray host, small Settings UI, single-instance signaling, SystemRequired power-request source path, normal shutdown/restart guard source path, battery observation and Battery Safety runtime state;
+  - `src/WindowsNoSleep.Core.psm1` settings/state/recovery/log helpers;
+  - `tests/StaticTests.ps1` parser/core/persistence tests;
+  - `.github/workflows/static-checks.yml` on a Windows runner with Windows PowerShell 5.1.
+- Evidence:
+  - first CI run correctly found a PowerShell 5.1 nullable-value bug in the Battery Safety helper;
+  - fixed in `329f161f1160d54b415d25f3c1a47b72689b23a9`;
+  - subsequent Windows PowerShell 5.1 PR check passed;
+  - current evidence label is **STATIC_CHECKED only**.
+- Deliberately not implemented/claimed yet:
+  - no lid-close power-policy mutation;
+  - no DC sleep/hibernate timeout mutation;
+  - no real recovery restore provider;
+  - no physical Modern Standby/lid/headless/battery test;
+  - no SentinelOne/EDR verification;
+  - no claim of defeating forced Windows Update restarts.
+- Local Cursor executor status: **WAIT / not dispatched**. No physical laptop power settings have been changed by this implementation work.
+- Next:
+  1. continue bounded P1 review/hardening on PR #2;
+  2. move to non-mutating Windows integration proof (power request / tray / shutdown guard) before any power-plan mutation;
+  3. request the local Cursor test machine only when GitHub/hosted-Windows evidence cannot prove the required behavior;
+  4. do not begin lid/DC mutation until recovery transaction logic is complete and a safety-bounded local dispatch exists.
+
 ## [2026-09-14] V1 product direction approved; GitHub Control Tower established
-- Phase: **P0 — Authority and plan**.
+- Phase at this entry: **P0 — Authority and plan**.
 - Authority added:
   - `docs/PLAN_V1.md`
   - `docs/TEST_PLAN.md`
@@ -30,12 +61,8 @@
   - project classified as **small utility / high integration sensitivity**;
   - default: one Control Tower + one implementation owner + local Windows executor only when hardware/OS proof is needed;
   - no swarm by default.
-- Local executor status: **WAIT / not dispatched**. No laptop changes requested yet.
-- Next:
-  1. finish P0 by creating one master GitHub Control Tower issue;
-  2. create `feat/v1-portable-tray` from the accepted P0 main head;
-  3. begin P1 source-safe implementation in GitHub without mutating the physical Windows test machine;
-  4. request Cursor local execution only when a Windows-only proof gate is reached.
+- Local executor status at this entry: **WAIT / not dispatched**.
+- Next: superseded by the P1 entry above.
 
 ## [2026-09-14] Initial local survey for windows_no_sleep rewrite
 - Files: `screenseverdisable/ScreenSaverDisabler.exe` (+ `.config`, `.pdb` only). No local source. No local git. GitHub `bohanyt/windows_no_sleep` exists but is empty (created 2026-09-14, public, admin on this account).
