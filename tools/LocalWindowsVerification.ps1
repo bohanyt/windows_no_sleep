@@ -150,7 +150,6 @@ $powerCfgRequests = Invoke-WnsReadOnlyCommand -FilePath 'powercfg.exe' -Argument
 $before = Get-WnsLocalPowerSnapshot
 Save-WnsEvidenceJson -Path $beforePath -Value $before
 
-$definitions = Get-WnsPowerPolicyDefinitions
 $plan = @()
 if ($null -ne $before.Lid -and $null -ne $before.SleepIdle) {
     $plan = @(New-WnsPowerPolicyPlan `
@@ -165,6 +164,8 @@ $summary = [pscustomobject][ordered]@{
     Mode = $Mode
     EvidenceDirectory = $runDir
     Before = $before
+    After = $null
+    AfterReadError = $null
     ProposedChanges = $plan
     PowerCfg = [pscustomobject][ordered]@{
         ActiveScheme = $powerCfgActive
@@ -211,7 +212,7 @@ if ($plan.Count -eq 0) {
     $summary.Outcome = 'NO_CHANGES_NEEDED'
     $summary.RestoreVerified = $true
     $after = Get-WnsLocalPowerSnapshot
-    $summary | Add-Member -NotePropertyName After -NotePropertyValue $after
+    $summary.After = $after
     Save-WnsEvidenceJson -Path $afterPath -Value $after
     Save-WnsEvidenceJson -Path $resultPath -Value $summary
     Write-Host 'LOCAL_WINDOWS_APPLY_RESTORE_SMOKE_COMPLETE: no values required modification.'
@@ -260,19 +261,33 @@ finally {
         else {
             $summary.Error = "$($summary.Error) | RESTORE: $restoreMessage"
         }
-        Write-Error "RESTORE FAILED. Do not continue testing. Recovery evidence is at $($transactionPaths.RecoveryPath). $restoreMessage"
+        # Do not use Write-Error here: ErrorActionPreference is Stop and evidence
+        # capture below is more important than terminating the finally block.
+        Write-Warning "RESTORE FAILED. Do not continue testing. Recovery evidence is at $($transactionPaths.RecoveryPath). $restoreMessage"
     }
 
-    $after = Get-WnsLocalPowerSnapshot
-    $summary | Add-Member -NotePropertyName After -NotePropertyValue $after -Force
-    Save-WnsEvidenceJson -Path $afterPath -Value $after
+    $after = $null
+    try {
+        $after = Get-WnsLocalPowerSnapshot
+        $summary.After = $after
+        Save-WnsEvidenceJson -Path $afterPath -Value $after
+    }
+    catch {
+        $summary.AfterReadError = $_.Exception.Message
+        $summary.RestoreVerified = $false
+    }
 
-    $lidRestored = ($after.ActiveSchemeGuid -eq $before.ActiveSchemeGuid) -and
-        ($after.Lid.AC -eq $before.Lid.AC) -and
-        ($after.Lid.DC -eq $before.Lid.DC)
-    $sleepRestored = ($after.ActiveSchemeGuid -eq $before.ActiveSchemeGuid) -and
-        ($after.SleepIdle.AC -eq $before.SleepIdle.AC) -and
-        ($after.SleepIdle.DC -eq $before.SleepIdle.DC)
+    $lidRestored = $false
+    $sleepRestored = $false
+    if ($null -ne $after -and $null -ne $after.Lid -and $null -ne $after.SleepIdle) {
+        $sameScheme = ($after.ActiveSchemeGuid -eq $before.ActiveSchemeGuid)
+        $lidRestored = $sameScheme -and
+            ($after.Lid.AC -eq $before.Lid.AC) -and
+            ($after.Lid.DC -eq $before.Lid.DC)
+        $sleepRestored = $sameScheme -and
+            ($after.SleepIdle.AC -eq $before.SleepIdle.AC) -and
+            ($after.SleepIdle.DC -eq $before.SleepIdle.DC)
+    }
 
     if ($summary.RestoreVerified -and $lidRestored -and $sleepRestored) {
         $summary.Outcome = 'APPLY_AND_EXACT_RESTORE_VERIFIED'
