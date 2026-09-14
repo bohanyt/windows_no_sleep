@@ -147,7 +147,9 @@ function Start-WnsPowerPolicyTransaction {
     }
     catch {
         $originalError = $_.Exception.Message
-        $rollbackErrors = Restore-WnsPolicyChangesInternal -Changes $attempted -ApplyChange $ApplyChange -VerifyChange $VerifyChange
+        # PowerShell unwraps an empty function result to $null; force an array so
+        # strict-mode Count checks are deterministic on Windows PowerShell 5.1.
+        $rollbackErrors = @(Restore-WnsPolicyChangesInternal -Changes $attempted -ApplyChange $ApplyChange -VerifyChange $VerifyChange)
         if ($rollbackErrors.Count -eq 0) {
             Clear-WnsRecoverySnapshot -Paths $Paths
             throw "Power-policy transaction failed and was rolled back successfully: $originalError"
@@ -196,7 +198,7 @@ function Restore-WnsPowerPolicyTransaction {
     }
 
     $changes = @($status.Snapshot.Changes)
-    $restoreErrors = Restore-WnsPolicyChangesInternal -Changes $changes -ApplyChange $ApplyChange -VerifyChange $VerifyChange
+    $restoreErrors = @(Restore-WnsPolicyChangesInternal -Changes $changes -ApplyChange $ApplyChange -VerifyChange $VerifyChange)
     if ($restoreErrors.Count -gt 0) {
         $detail = ($restoreErrors | ForEach-Object { "$($_.Name): $($_.Error)" }) -join '; '
         throw "Power-policy restore is incomplete. Recovery snapshot was preserved: $detail"
