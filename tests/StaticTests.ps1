@@ -17,17 +17,21 @@ function Assert-Wns {
 }
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$appPath = Join-Path $repoRoot 'WindowsNoSleep.ps1'
 $corePath = Join-Path $repoRoot 'src\WindowsNoSleep.Core.psm1'
 
-Write-Host 'Checking PowerShell parser errors...'
-foreach ($path in @($appPath, $corePath)) {
+Write-Host 'Checking PowerShell parser errors across repository source/tests/tools...'
+$parseTargets = @(Get-ChildItem -LiteralPath $repoRoot -Recurse -File | Where-Object {
+    $_.Extension -eq '.ps1' -or $_.Extension -eq '.psm1'
+})
+Assert-Wns ($parseTargets.Count -gt 0) 'No PowerShell files were found to parse.'
+
+foreach ($file in $parseTargets) {
     $tokens = $null
     $parseErrors = $null
-    [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$parseErrors)
+    [void][System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors)
     if ($parseErrors.Count -gt 0) {
         $messages = ($parseErrors | ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Message)" }) -join [Environment]::NewLine
-        throw "Parser errors in $path`:$([Environment]::NewLine)$messages"
+        throw "Parser errors in $($file.FullName)`:$([Environment]::NewLine)$messages"
     }
 }
 
