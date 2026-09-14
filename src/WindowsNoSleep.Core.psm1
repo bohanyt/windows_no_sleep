@@ -216,8 +216,10 @@ function Get-WnsEffectiveBatterySafetyThreshold {
 
     $effective = [Math]::Min(50, [Math]::Max(5, $BasePercent))
 
-    if ($null -ne $WindowsCriticalPercent -and $WindowsCriticalPercent.HasValue) {
-        $candidate = $WindowsCriticalPercent.Value + 5
+    # Windows PowerShell 5.1 unwraps a non-null Nullable[int] argument to
+    # System.Int32, so do not depend on Nullable<T>.HasValue here.
+    if ($null -ne $WindowsCriticalPercent) {
+        $candidate = ([int]$WindowsCriticalPercent) + 5
         if ($candidate -gt $effective) {
             $effective = $candidate
         }
