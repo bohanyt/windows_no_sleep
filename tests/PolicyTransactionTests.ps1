@@ -39,8 +39,10 @@ function New-FakeChange {
 $repoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 $corePath = Join-Path $repoRoot 'src\WindowsNoSleep.Core.psm1'
 $transactionPath = Join-Path $repoRoot 'src\WindowsNoSleep.PolicyTransaction.psm1'
-Import-Module $corePath -Force
+# Import the transaction module first; it owns nested imports. Re-import Core
+# afterwards so its helpers are explicitly visible to this test script scope.
 Import-Module $transactionPath -Force
+Import-Module $corePath -Force
 
 $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('WindowsNoSleep.TransactionTests.' + [Guid]::NewGuid().ToString('N'))
 try {
@@ -58,11 +60,11 @@ try {
         LidAction = [pscustomobject]@{ AC = [uint32]1; DC = [uint32]1 }
         SleepIdle = [pscustomobject]@{ AC = [uint32]0; DC = [uint32]1200 }
     }
-    $snapshotSeenBeforeFirstApply = $false
+    $observer = [pscustomobject]@{ SnapshotSeenBeforeFirstApply = $false }
     $applyAction = {
         param($Change, [bool]$RestoreOriginal)
-        if (-not $RestoreOriginal -and -not $snapshotSeenBeforeFirstApply) {
-            $snapshotSeenBeforeFirstApply = (Test-Path -LiteralPath $paths.RecoveryPath)
+        if (-not $RestoreOriginal -and -not $observer.SnapshotSeenBeforeFirstApply) {
+            $observer.SnapshotSeenBeforeFirstApply = (Test-Path -LiteralPath $paths.RecoveryPath)
         }
         $entry = $state[[string]$Change.Name]
         if ([bool]$Change.ApplyAC) {
@@ -83,7 +85,7 @@ try {
     }.GetNewClosure()
 
     $started = Start-WnsPowerPolicyTransaction -Paths $paths -SchemeGuid $scheme -Changes $changes -ApplyChange $applyAction -VerifyChange $verifyAction
-    Assert-Wns $snapshotSeenBeforeFirstApply 'Recovery snapshot must exist before the first policy mutation callback.'
+    Assert-Wns $observer.SnapshotSeenBeforeFirstApply 'Recovery snapshot must exist before the first policy mutation callback.'
     Assert-Wns ($started.Active -and $started.ChangeCount -eq 2) 'Successful transaction result is wrong.'
     Assert-Wns ($state.LidAction.AC -eq 0 -and $state.LidAction.DC -eq 0) 'Lid target was not applied.'
     Assert-Wns ($state.SleepIdle.DC -eq 0) 'DC sleep target was not applied.'
@@ -97,11 +99,11 @@ try {
 
     Write-Host 'Checking apply failure rolls back all possibly touched entries...'
     $state.LidAction.AC = 1; $state.LidAction.DC = 1; $state.SleepIdle.DC = 1200
-    $applyCount = 0
+    $applyCounter = [pscustomobject]@{ Value = 0 }
     $failingApply = {
         param($Change, [bool]$RestoreOriginal)
         if (-not $RestoreOriginal) {
-            $applyCount++
+            $applyCounter.Value++
         }
         $entry = $state[[string]$Change.Name]
         if ([bool]$Change.ApplyAC) {
@@ -110,7 +112,7 @@ try {
         if ([bool]$Change.ApplyDC) {
             $entry.DC = if ($RestoreOriginal) { [uint32]$Change.OriginalDC } else { [uint32]$Change.TargetDC }
         }
-        if (-not $RestoreOriginal -and $applyCount -eq 2) {
+        if (-not $RestoreOriginal -and $applyCounter.Value -eq 2) {
             throw 'synthetic apply failure after possible partial write'
         }
     }.GetNewClosure()
