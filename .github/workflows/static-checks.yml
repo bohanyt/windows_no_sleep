@@ -1,0 +1,23 @@
+name: static-checks
+
+on:
+  push:
+    branches:
+      - feat/v1-portable-tray
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  windows-powershell-51:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell 5.1 static tests
+        shell: powershell
+        run: |
+          $PSVersionTable.PSVersion
+          & .\tests\StaticTests.ps1
