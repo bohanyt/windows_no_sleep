@@ -22,6 +22,14 @@ function Get-NormalizedText {
     return (($Text -replace "`r`n", "`n").Trim())
 }
 
+function Get-WnsFileTextOrPlaceholder {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (Test-Path -LiteralPath $Path) {
+        return (Get-Content -LiteralPath $Path -Raw -ErrorAction SilentlyContinue)
+    }
+    return '<missing>'
+}
+
 function Wait-WnsLogPattern {
     param(
         [Parameter(Mandatory = $true)][string]$Path,
@@ -105,6 +113,10 @@ $powerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powe
 $tempLocalAppData = Join-Path ([System.IO.Path]::GetTempPath()) ('WindowsNoSleep.E2E.' + [Guid]::NewGuid().ToString('N'))
 $runtimeDir = Join-Path $tempLocalAppData 'WindowsNoSleep'
 $logPath = Join-Path $runtimeDir 'events.log'
+$stdoutPath = Join-Path $tempLocalAppData 'app.stdout.txt'
+$stderrPath = Join-Path $tempLocalAppData 'app.stderr.txt'
+$secondStdoutPath = Join-Path $tempLocalAppData 'second.stdout.txt'
+$secondStderrPath = Join-Path $tempLocalAppData 'second.stderr.txt'
 $reasonFragment = 'Windows No Sleep is keeping this computer available for its running workloads.'
 $originalLocalAppData = $env:LOCALAPPDATA
 $appProcess = $null
@@ -121,22 +133,24 @@ try {
     }
     $powerQueryBefore = Get-NormalizedText ((& powercfg.exe /query 2>&1 | Out-String))
     if ($LASTEXITCODE -ne 0) {
-        throw "powercfg /query failed before test."
+        throw 'powercfg /query failed before test.'
     }
 
     Write-Host 'Launching full tray app with default protection...'
     $arguments = @(
         '-NoProfile',
         '-STA',
-        '-WindowStyle', 'Hidden',
         '-File', ('"{0}"' -f $appPath)
     )
-    $appProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -PassThru
+    $appProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru
 
     $protected = Wait-WnsLogPattern -Path $logPath -Pattern 'State -> PROTECTED:' -TimeoutSeconds 20
     if (-not $protected) {
-        $logText = if (Test-Path -LiteralPath $logPath) { Get-Content -LiteralPath $logPath -Raw } else { '<no log file>' }
-        throw "App did not reach PROTECTED on hosted Windows within timeout.`r`n$logText"
+        $logText = Get-WnsFileTextOrPlaceholder -Path $logPath
+        $stdoutText = Get-WnsFileTextOrPlaceholder -Path $stdoutPath
+        $stderrText = Get-WnsFileTextOrPlaceholder -Path $stderrPath
+        $processState = if ($appProcess.HasExited) { "exited code=$($appProcess.ExitCode)" } else { 'still running' }
+        throw "App did not reach PROTECTED on hosted Windows within timeout. Process=$processState`r`nLOG:`r`n$logText`r`nSTDOUT:`r`n$stdoutText`r`nSTDERR:`r`n$stderrText"
     }
     Assert-Wns (-not $appProcess.HasExited) 'Primary tray process exited after reporting PROTECTED.'
 
@@ -152,9 +166,11 @@ try {
     }
 
     Write-Host 'Checking single-instance behavior...'
-    $secondProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -PassThru
+    $secondProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -RedirectStandardOutput $secondStdoutPath -RedirectStandardError $secondStderrPath -PassThru
     Assert-Wns ($secondProcess.WaitForExit(7000)) 'Second launch did not exit after signaling the existing instance.'
-    Assert-Wns ($secondProcess.ExitCode -eq 0) 'Second launch returned a non-zero exit code.'
+    if ($secondProcess.ExitCode -ne 0) {
+        throw "Second launch returned exit code $($secondProcess.ExitCode). STDERR: $(Get-WnsFileTextOrPlaceholder -Path $secondStderrPath)"
+    }
     Start-Sleep -Milliseconds 750
     Assert-Wns (-not $appProcess.HasExited) 'Primary instance died after second-instance signaling.'
 
