@@ -1,5 +1,10 @@
 Set-StrictMode -Version Latest
 
+# Load native/WinForms types through a dedicated loader that supplies explicit
+# framework references on Windows PowerShell 5.1. The main app retains a
+# guarded legacy definition block, but it is skipped once this type exists.
+Import-Module (Join-Path $PSScriptRoot 'WindowsNoSleep.Interop.psm1') -Force
+
 $script:WnsAppName = 'WindowsNoSleep'
 $script:WnsSettingsVersion = 1
 $script:WnsRecoveryVersion = 1
