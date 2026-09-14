@@ -1,117 +1,21 @@
 #requires -Version 5.1
 
 [CmdletBinding()]
-param()
+param(
+    [switch]$RecoveryOnly
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'Windows No Sleep'
-$script:AppVersion = '0.1.0-dev'
+$script:AppVersion = '0.2.0-dev'
 $script:ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$script:CoreModule = Join-Path $script:ScriptRoot 'src\WindowsNoSleep.Core.psm1'
+$script:ScriptPath = Join-Path $script:ScriptRoot 'WindowsNoSleep.ps1'
 
-Import-Module $script:CoreModule -Force
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-
-if (-not ('WindowsNoSleep.Interop.NativeMethods' -as [type])) {
-    Add-Type -TypeDefinition @'
-using System;
-using System.Drawing;
-using System.Runtime.InteropServices;
-using System.Windows.Forms;
-
-namespace WindowsNoSleep.Interop
-{
-    public enum PowerRequestType
-    {
-        DisplayRequired = 0,
-        SystemRequired = 1,
-        AwayModeRequired = 2,
-        ExecutionRequired = 3
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    public struct ReasonContext
-    {
-        public UInt32 Version;
-        public UInt32 Flags;
-        [MarshalAs(UnmanagedType.LPWStr)]
-        public string SimpleReasonString;
-    }
-
-    public static class NativeMethods
-    {
-        [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        public static extern IntPtr PowerCreateRequest(ref ReasonContext Context);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool PowerSetRequest(IntPtr PowerRequest, PowerRequestType RequestType);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool PowerClearRequest(IntPtr PowerRequest, PowerRequestType RequestType);
-
-        [DllImport("kernel32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool CloseHandle(IntPtr hObject);
-
-        [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool ShutdownBlockReasonCreate(IntPtr hWnd, string pwszReason);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        public static extern bool ShutdownBlockReasonDestroy(IntPtr hWnd);
-    }
-
-    public sealed class ShutdownHostForm : Form
-    {
-        public bool BlockShutdown { get; set; }
-        public event EventHandler ShutdownBlocked;
-
-        public ShutdownHostForm()
-        {
-            BlockShutdown = false;
-            ShowInTaskbar = false;
-            FormBorderStyle = FormBorderStyle.FixedToolWindow;
-            Opacity = 0.0;
-            Width = 1;
-            Height = 1;
-            StartPosition = FormStartPosition.Manual;
-            Location = new Point(-32000, -32000);
-            Text = "Windows No Sleep Host";
-        }
-
-        protected override void SetVisibleCore(bool value)
-        {
-            base.SetVisibleCore(false);
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            const int WM_QUERYENDSESSION = 0x0011;
-
-            if (m.Msg == WM_QUERYENDSESSION && BlockShutdown)
-            {
-                EventHandler handler = ShutdownBlocked;
-                if (handler != null)
-                {
-                    handler(this, EventArgs.Empty);
-                }
-
-                m.Result = IntPtr.Zero;
-                return;
-            }
-
-            base.WndProc(ref m);
-        }
-    }
-}
-'@
-}
+Import-Module (Join-Path $script:ScriptRoot 'src\WindowsNoSleep.Core.psm1') -Force
+Import-Module (Join-Path $script:ScriptRoot 'src\WindowsNoSleep.Interop.psm1') -Force
+Import-Module (Join-Path $script:ScriptRoot 'src\WindowsNoSleep.RuntimePolicy.psm1') -Force
 
 [System.Windows.Forms.Application]::EnableVisualStyles()
 [System.Windows.Forms.Application]::SetCompatibleTextRenderingDefault($false)
@@ -124,6 +28,7 @@ $script:PowerHandle = [IntPtr]::Zero
 $script:SystemRequestSet = $false
 $script:DisplayRequestSet = $false
 $script:ShutdownReasonSet = $false
+$script:CoreProtectionActive = $false
 $script:UserStopped = $false
 $script:Exiting = $false
 $script:SettingsForm = $null
@@ -131,6 +36,9 @@ $script:NotifyIcon = $null
 $script:HostForm = $null
 $script:BatteryTimer = $null
 $script:OpenTimer = $null
+$script:ToggleMenu = $null
+$script:Mutex = $null
+$script:OpenSettingsEvent = $null
 
 function Get-WnsLastWin32ErrorText {
     $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error()
@@ -140,40 +48,138 @@ function Get-WnsLastWin32ErrorText {
 
 function Get-WnsBatterySnapshot {
     $status = [System.Windows.Forms.SystemInformation]::PowerStatus
-    $noSystemBattery = (($status.BatteryChargeStatus -band [System.Windows.Forms.BatteryChargeStatus]::NoSystemBattery) -ne 0)
+    $noBattery = (($status.BatteryChargeStatus -band [System.Windows.Forms.BatteryChargeStatus]::NoSystemBattery) -ne 0)
     $percent = $null
 
-    if (-not $noSystemBattery -and $status.BatteryLifePercent -ge 0) {
+    if (-not $noBattery -and $status.BatteryLifePercent -ge 0) {
         $percent = [int][Math]::Round(([double]$status.BatteryLifePercent) * 100.0)
         $percent = [Math]::Min(100, [Math]::Max(0, $percent))
     }
 
-    return [pscustomobject]@{
-        HasBattery = (-not $noSystemBattery)
-        OnAC       = ($status.PowerLineStatus -eq [System.Windows.Forms.PowerLineStatus]::Online)
-        Percent    = $percent
-        RawStatus  = [string]$status.BatteryChargeStatus
+    return [pscustomobject][ordered]@{
+        HasBattery = (-not $noBattery)
+        OnAC = ($status.PowerLineStatus -eq [System.Windows.Forms.PowerLineStatus]::Online)
+        Percent = $percent
+        RawStatus = [string]$status.BatteryChargeStatus
     }
 }
 
 function Get-WnsBatteryThreshold {
-    # Reading the Windows/OEM critical threshold is added in the transactional
-    # power-policy phase. Until then, use the owner-approved base threshold.
-    return Get-WnsEffectiveBatterySafetyThreshold -BasePercent $script:Settings.BatterySafetyPercent
+    return Get-WnsRuntimeBatterySafetyThreshold -Settings $script:Settings
 }
 
 function Set-WnsRuntimeState {
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$Status,
-        [Parameter(Mandatory = $true)]
-        [string]$Reason
+        [Parameter(Mandatory = $true)][string]$Status,
+        [Parameter(Mandatory = $true)][string]$Reason
     )
 
     $script:State = Set-WnsState -State $script:State -Status $Status -Reason $Reason
     Write-WnsLog -Paths $script:Paths -Message ("State -> {0}: {1}" -f $Status, $Reason)
     Update-WnsTrayState
     Update-WnsSettingsView
+}
+
+function Get-WnsRecoveryRunOnceKey {
+    return 'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+}
+
+function Enable-WnsRecoveryRunOnce {
+    $key = Get-WnsRecoveryRunOnceKey
+    $command = 'powershell.exe -NoProfile -STA -WindowStyle Hidden -File "{0}" -RecoveryOnly' -f $script:ScriptPath
+    New-Item -Path $key -Force | Out-Null
+    Set-ItemProperty -Path $key -Name 'WindowsNoSleepRecovery' -Value $command -Type String
+}
+
+function Disable-WnsRecoveryRunOnce {
+    Remove-ItemProperty -Path (Get-WnsRecoveryRunOnceKey) -Name 'WindowsNoSleepRecovery' -ErrorAction SilentlyContinue
+}
+
+function Restore-WnsOwnedPolicy {
+    param(
+        [string]$Reason = 'runtime cleanup',
+        [switch]$ThrowOnFailure
+    )
+
+    try {
+        $result = Restore-WnsRuntimePolicyIfPending -Paths $script:Paths
+        if ($result.Restored) {
+            Write-WnsLog -Paths $script:Paths -Message ("Restored {0} temporary power-policy change(s): {1}." -f $result.ChangeCount, $Reason)
+        }
+        Disable-WnsRecoveryRunOnce
+        return [pscustomobject][ordered]@{
+            Restored = [bool]$result.Restored
+            ChangeCount = [int]$result.ChangeCount
+            Error = $null
+        }
+    }
+    catch {
+        $message = $_.Exception.Message
+        Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Temporary power-policy restore failed ($Reason): $message"
+        if ($ThrowOnFailure) {
+            throw
+        }
+        return [pscustomobject][ordered]@{
+            Restored = $false
+            ChangeCount = 0
+            Error = $message
+        }
+    }
+}
+
+function Enable-WnsOwnedPolicy {
+    $battery = Get-WnsBatterySnapshot
+
+    if ($battery.HasBattery -and ([bool]$script:Settings.LidProtection -or [bool]$script:Settings.ProtectOnBattery)) {
+        # The RunOnce hook is deliberately installed before any policy write.
+        # If the process or OS dies after a successful write, the next sign-in
+        # has a supported, non-bypass path that attempts exact recovery first.
+        Enable-WnsRecoveryRunOnce
+    }
+
+    try {
+        $result = Reset-WnsRuntimePolicyProtection `
+            -Paths $script:Paths `
+            -Settings $script:Settings `
+            -HasBattery ([bool]$battery.HasBattery)
+
+        if ($result.Active) {
+            $names = (@($result.Changes | ForEach-Object { $_.Name }) -join ', ')
+            Write-WnsLog -Paths $script:Paths -Message ("Temporary power-policy protection active on scheme {0}: {1}." -f $result.SchemeGuid, $names)
+        }
+        else {
+            Disable-WnsRecoveryRunOnce
+        }
+        return $result
+    }
+    catch {
+        if ((Get-WnsRecoveryStatus -Paths $script:Paths).Status -eq 'None') {
+            Disable-WnsRecoveryRunOnce
+        }
+        throw
+    }
+}
+
+function Sync-WnsOwnedPolicy {
+    $battery = Get-WnsBatterySnapshot
+    if (-not $battery.HasBattery) {
+        return
+    }
+
+    $result = Sync-WnsRuntimePolicyProtection `
+        -Paths $script:Paths `
+        -Settings $script:Settings `
+        -HasBattery $true
+
+    if ($result.Rebound) {
+        if ($result.Active) {
+            Enable-WnsRecoveryRunOnce
+        }
+        else {
+            Disable-WnsRecoveryRunOnce
+        }
+        Write-WnsLog -Paths $script:Paths -Message $result.Reason
+    }
 }
 
 function New-WnsPowerRequestHandle {
@@ -186,7 +192,6 @@ function New-WnsPowerRequestHandle {
     if ($handle -eq [IntPtr](-1)) {
         throw "PowerCreateRequest failed. $(Get-WnsLastWin32ErrorText)"
     }
-
     return $handle
 }
 
@@ -205,7 +210,7 @@ function Enable-WnsPowerRequests {
         $script:SystemRequestSet = $true
     }
 
-    if ($script:Settings.KeepDisplayOn -and -not $script:DisplayRequestSet) {
+    if ([bool]$script:Settings.KeepDisplayOn -and -not $script:DisplayRequestSet) {
         if (-not [WindowsNoSleep.Interop.NativeMethods]::PowerSetRequest(
             $script:PowerHandle,
             [WindowsNoSleep.Interop.PowerRequestType]::DisplayRequired
@@ -214,7 +219,7 @@ function Enable-WnsPowerRequests {
         }
         $script:DisplayRequestSet = $true
     }
-    elseif (-not $script:Settings.KeepDisplayOn -and $script:DisplayRequestSet) {
+    elseif (-not [bool]$script:Settings.KeepDisplayOn -and $script:DisplayRequestSet) {
         [void][WindowsNoSleep.Interop.NativeMethods]::PowerClearRequest(
             $script:PowerHandle,
             [WindowsNoSleep.Interop.PowerRequestType]::DisplayRequired
@@ -229,27 +234,19 @@ function Disable-WnsPowerRequests {
     }
 
     if ($script:DisplayRequestSet) {
-        [void][WindowsNoSleep.Interop.NativeMethods]::PowerClearRequest(
-            $script:PowerHandle,
-            [WindowsNoSleep.Interop.PowerRequestType]::DisplayRequired
-        )
+        [void][WindowsNoSleep.Interop.NativeMethods]::PowerClearRequest($script:PowerHandle, [WindowsNoSleep.Interop.PowerRequestType]::DisplayRequired)
         $script:DisplayRequestSet = $false
     }
-
     if ($script:SystemRequestSet) {
-        [void][WindowsNoSleep.Interop.NativeMethods]::PowerClearRequest(
-            $script:PowerHandle,
-            [WindowsNoSleep.Interop.PowerRequestType]::SystemRequired
-        )
+        [void][WindowsNoSleep.Interop.NativeMethods]::PowerClearRequest($script:PowerHandle, [WindowsNoSleep.Interop.PowerRequestType]::SystemRequired)
         $script:SystemRequestSet = $false
     }
-
     [void][WindowsNoSleep.Interop.NativeMethods]::CloseHandle($script:PowerHandle)
     $script:PowerHandle = [IntPtr]::Zero
 }
 
 function Enable-WnsShutdownGuard {
-    if (-not $script:Settings.BlockRestart) {
+    if (-not [bool]$script:Settings.BlockRestart) {
         Disable-WnsShutdownGuard
         return
     }
@@ -271,7 +268,6 @@ function Disable-WnsShutdownGuard {
     if ($null -eq $script:HostForm) {
         return
     }
-
     $script:HostForm.BlockShutdown = $false
     if ($script:ShutdownReasonSet) {
         [void][WindowsNoSleep.Interop.NativeMethods]::ShutdownBlockReasonDestroy($script:HostForm.Handle)
@@ -284,34 +280,35 @@ function Test-WnsBatterySafetyRequired {
     if (-not $battery.HasBattery -or $battery.OnAC) {
         return $false
     }
-
-    if (-not $script:Settings.ProtectOnBattery) {
+    if (-not [bool]$script:Settings.ProtectOnBattery) {
         return $true
     }
-
     if ($null -eq $battery.Percent) {
         return $false
     }
-
     return ($battery.Percent -le (Get-WnsBatteryThreshold))
 }
 
 function Enter-WnsBatterySafety {
     $battery = Get-WnsBatterySnapshot
+    $restore = Restore-WnsOwnedPolicy -Reason 'Battery Safety'
+
     Disable-WnsShutdownGuard
     Disable-WnsPowerRequests
+    $script:CoreProtectionActive = $false
 
-    # The transactional lid/sleep restoration provider is intentionally not
-    # wired until the dedicated Windows integration phase. When it is added,
-    # restoration must happen here before BATTERY_SAFETY is announced.
-    $reason = if (-not $script:Settings.ProtectOnBattery) {
-        'Battery protection is disabled by settings.'
+    $reason = if (-not [bool]$script:Settings.ProtectOnBattery) {
+        'Battery protection is disabled by settings; normal Windows power policy is restored.'
     }
     elseif ($null -ne $battery.Percent) {
-        "Battery is $($battery.Percent)% (safety threshold $(Get-WnsBatteryThreshold)%)."
+        "Battery is $($battery.Percent)% (safety threshold $(Get-WnsBatteryThreshold)%); normal Windows power policy is restored."
     }
     else {
-        'Battery safety requested.'
+        'Battery Safety requested; normal Windows power policy is restored.'
+    }
+
+    if ($null -ne $restore.Error) {
+        $reason += " WARNING: temporary policy restore failed: $($restore.Error)"
     }
 
     if ($script:State.Status -ne 'BATTERY_SAFETY') {
@@ -320,11 +317,9 @@ function Enter-WnsBatterySafety {
 }
 
 function Start-WnsProtection {
-    param(
-        [switch]$AutomaticResume
-    )
+    param([switch]$AutomaticResume)
 
-    if (-not $script:Settings.KeepComputerAwake) {
+    if (-not [bool]$script:Settings.KeepComputerAwake) {
         Stop-WnsProtection -Reason 'Protection disabled in settings.'
         return
     }
@@ -337,19 +332,33 @@ function Start-WnsProtection {
     try {
         Enable-WnsPowerRequests
         Enable-WnsShutdownGuard
-
-        if (-not $AutomaticResume) {
-            $script:UserStopped = $false
-        }
-
-        if ($script:State.Status -ne 'PROTECTED') {
-            Set-WnsRuntimeState -Status 'PROTECTED' -Reason 'System power request is active.'
-        }
+        $script:CoreProtectionActive = $true
     }
     catch {
         Disable-WnsShutdownGuard
         Disable-WnsPowerRequests
+        $script:CoreProtectionActive = $false
         Set-WnsRuntimeState -Status 'DEGRADED' -Reason $_.Exception.Message
+        return
+    }
+
+    if (-not $AutomaticResume) {
+        $script:UserStopped = $false
+    }
+
+    try {
+        $policy = Enable-WnsOwnedPolicy
+        $detail = if ($policy.Active) {
+            "System power request is active; $($policy.ChangeCount) temporary power-policy change(s) are protected by exact recovery."
+        }
+        else {
+            'System power request is active; no temporary power-policy change is required on this machine.'
+        }
+        Set-WnsRuntimeState -Status 'PROTECTED' -Reason $detail
+    }
+    catch {
+        Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Runtime power-policy protection unavailable: $($_.Exception.Message)"
+        Set-WnsRuntimeState -Status 'DEGRADED' -Reason "System power request is active, but temporary lid/battery policy protection is unavailable: $($_.Exception.Message)"
     }
 }
 
@@ -359,11 +368,17 @@ function Stop-WnsProtection {
         [switch]$UserInitiated
     )
 
+    $restore = Restore-WnsOwnedPolicy -Reason $Reason
     Disable-WnsShutdownGuard
     Disable-WnsPowerRequests
+    $script:CoreProtectionActive = $false
 
     if ($UserInitiated) {
         $script:UserStopped = $true
+    }
+
+    if ($null -ne $restore.Error) {
+        $Reason += " WARNING: temporary policy restore failed: $($restore.Error)"
     }
 
     if ($script:State.Status -ne 'STOPPED' -and $script:State.Status -ne 'EXITING') {
@@ -372,25 +387,16 @@ function Stop-WnsProtection {
 }
 
 function Set-WnsAutostart {
-    param(
-        [Parameter(Mandatory = $true)]
-        [bool]$Enabled
-    )
+    param([Parameter(Mandatory = $true)][bool]$Enabled)
 
-    $runKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
-    $valueName = 'WindowsNoSleep'
-
+    $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
     if ($Enabled) {
-        $scriptPath = $MyInvocation.ScriptName
-        if ([string]::IsNullOrWhiteSpace($scriptPath)) {
-            $scriptPath = Join-Path $script:ScriptRoot 'WindowsNoSleep.ps1'
-        }
-        $command = 'powershell.exe -NoProfile -STA -WindowStyle Hidden -File "{0}"' -f $scriptPath
-        New-Item -Path $runKey -Force | Out-Null
-        Set-ItemProperty -Path $runKey -Name $valueName -Value $command -Type String
+        $command = 'powershell.exe -NoProfile -STA -WindowStyle Hidden -File "{0}"' -f $script:ScriptPath
+        New-Item -Path $key -Force | Out-Null
+        Set-ItemProperty -Path $key -Name 'WindowsNoSleep' -Value $command -Type String
     }
     else {
-        Remove-ItemProperty -Path $runKey -Name $valueName -ErrorAction SilentlyContinue
+        Remove-ItemProperty -Path $key -Name 'WindowsNoSleep' -ErrorAction SilentlyContinue
     }
 }
 
@@ -400,7 +406,7 @@ function Update-WnsTrayState {
     }
 
     $battery = Get-WnsBatterySnapshot
-    $powerText = if ($battery.OnAC) { 'AC' } elseif ($battery.HasBattery) { 'Battery' } else { 'Unknown power' }
+    $powerText = if ($battery.OnAC) { 'AC' } elseif ($battery.HasBattery) { 'Battery' } else { 'No battery' }
 
     switch ($script:State.Status) {
         'PROTECTED' {
@@ -425,42 +431,11 @@ function Update-WnsTrayState {
         }
     }
 
-    if ($text.Length -gt 63) {
-        $text = $text.Substring(0, 63)
-    }
+    if ($text.Length -gt 63) { $text = $text.Substring(0, 63) }
     $script:NotifyIcon.Text = $text
-}
 
-function Update-WnsSettingsView {
-    if ($null -eq $script:SettingsForm -or $script:SettingsForm.IsDisposed) {
-        return
-    }
-
-    $statusLabel = $script:SettingsForm.Controls['StatusLabel']
-    $detailLabel = $script:SettingsForm.Controls['DetailLabel']
-    $batteryLabel = $script:SettingsForm.Controls['BatteryLabel']
-    $startStopButton = $script:SettingsForm.Controls['StartStopButton']
-
-    if ($null -ne $statusLabel) {
-        $statusLabel.Text = "Status: $($script:State.Status)"
-    }
-    if ($null -ne $detailLabel) {
-        $detailLabel.Text = $script:State.Reason
-    }
-
-    $battery = Get-WnsBatterySnapshot
-    if ($null -ne $batteryLabel) {
-        if ($battery.HasBattery -and $null -ne $battery.Percent) {
-            $source = if ($battery.OnAC) { 'AC' } else { 'Battery' }
-            $batteryLabel.Text = "Power: $source | Battery: $($battery.Percent)% | Safety: $(Get-WnsBatteryThreshold)%"
-        }
-        else {
-            $batteryLabel.Text = 'Power: no system battery detected'
-        }
-    }
-
-    if ($null -ne $startStopButton) {
-        $startStopButton.Text = if ($script:State.Status -eq 'PROTECTED' -or $script:State.Status -eq 'DEGRADED') {
+    if ($null -ne $script:ToggleMenu) {
+        $script:ToggleMenu.Text = if ($script:State.Status -eq 'PROTECTED' -or $script:State.Status -eq 'DEGRADED') {
             'Stop Protection'
         }
         else {
@@ -469,13 +444,42 @@ function Update-WnsSettingsView {
     }
 }
 
-function Save-WnsSettingsFromForm {
-    if ($null -eq $script:SettingsForm) {
+function Update-WnsSettingsView {
+    if ($null -eq $script:SettingsForm -or $script:SettingsForm.IsDisposed) {
         return
     }
 
-    $oldAutostart = [bool]$script:Settings.StartWithWindows
+    $script:SettingsForm.Controls['StatusLabel'].Text = "Status: $($script:State.Status)"
+    $script:SettingsForm.Controls['DetailLabel'].Text = $script:State.Reason
 
+    $battery = Get-WnsBatterySnapshot
+    if ($battery.HasBattery -and $null -ne $battery.Percent) {
+        $source = if ($battery.OnAC) { 'AC' } else { 'Battery' }
+        $script:SettingsForm.Controls['BatteryLabel'].Text = "Power: $source | Battery: $($battery.Percent)% | Safety: $(Get-WnsBatteryThreshold)%"
+    }
+    else {
+        $script:SettingsForm.Controls['BatteryLabel'].Text = 'Power: no system battery detected'
+    }
+
+    $recovery = Get-WnsRecoveryStatus -Paths $script:Paths
+    $script:SettingsForm.Controls['PolicyLabel'].Text = switch ($recovery.Status) {
+        'Pending' { "Temporary policy: active ($(@($recovery.Snapshot.Changes).Count) change(s), exact restore armed)" }
+        'Corrupt' { 'Temporary policy: RECOVERY DATA CORRUPT' }
+        default { 'Temporary policy: none required / fully restored' }
+    }
+
+    $script:SettingsForm.Controls['StartStopButton'].Text = if ($script:State.Status -eq 'PROTECTED' -or $script:State.Status -eq 'DEGRADED') {
+        'Stop Protection'
+    }
+    else {
+        'Start Protection'
+    }
+}
+
+function Save-WnsSettingsFromForm {
+    if ($null -eq $script:SettingsForm) { return }
+
+    $oldAutostart = [bool]$script:Settings.StartWithWindows
     $script:Settings.KeepComputerAwake = [bool]$script:SettingsForm.Controls['KeepComputerAwake'].Checked
     $script:Settings.ProtectOnBattery = [bool]$script:SettingsForm.Controls['ProtectOnBattery'].Checked
     $script:Settings.LidProtection = [bool]$script:SettingsForm.Controls['LidProtection'].Checked
@@ -483,7 +487,6 @@ function Save-WnsSettingsFromForm {
     $script:Settings.StartWithWindows = [bool]$script:SettingsForm.Controls['StartWithWindows'].Checked
     $script:Settings.KeepDisplayOn = [bool]$script:SettingsForm.Controls['KeepDisplayOn'].Checked
     $script:Settings.BatterySafetyPercent = [int]$script:SettingsForm.Controls['BatterySafetyPercent'].Value
-
     $script:Settings = Save-WnsSettings -Paths $script:Paths -Settings $script:Settings
 
     if ($oldAutostart -ne [bool]$script:Settings.StartWithWindows) {
@@ -501,146 +504,77 @@ function Save-WnsSettingsFromForm {
         }
     }
 
-    if ($script:Settings.KeepComputerAwake) {
+    if ([bool]$script:Settings.KeepComputerAwake) {
         Start-WnsProtection
     }
     else {
         Stop-WnsProtection -Reason 'Protection disabled in settings.' -UserInitiated
     }
-
     Update-WnsSettingsView
 }
 
 function New-WnsSettingsForm {
     $form = New-Object System.Windows.Forms.Form
     $form.Name = 'SettingsForm'
-    $form.Text = "Windows No Sleep $($script:AppVersion)"
-    $form.Width = 430
-    $form.Height = 480
-    $form.MinimumSize = New-Object System.Drawing.Size(430, 480)
+    $form.Text = "$($script:AppName) $($script:AppVersion)"
+    $form.Width = 450
+    $form.Height = 535
+    $form.MinimumSize = New-Object System.Drawing.Size(450, 535)
     $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
     $form.MaximizeBox = $false
     $form.ShowInTaskbar = $true
 
     $status = New-Object System.Windows.Forms.Label
-    $status.Name = 'StatusLabel'
-    $status.Left = 20
-    $status.Top = 20
-    $status.Width = 375
-    $status.Height = 25
+    $status.Name = 'StatusLabel'; $status.Left = 20; $status.Top = 20; $status.Width = 390; $status.Height = 25
     $status.Font = New-Object System.Drawing.Font($status.Font, [System.Drawing.FontStyle]::Bold)
     $form.Controls.Add($status)
 
     $detail = New-Object System.Windows.Forms.Label
-    $detail.Name = 'DetailLabel'
-    $detail.Left = 20
-    $detail.Top = 48
-    $detail.Width = 375
-    $detail.Height = 42
+    $detail.Name = 'DetailLabel'; $detail.Left = 20; $detail.Top = 48; $detail.Width = 390; $detail.Height = 58
     $form.Controls.Add($detail)
 
     $battery = New-Object System.Windows.Forms.Label
-    $battery.Name = 'BatteryLabel'
-    $battery.Left = 20
-    $battery.Top = 90
-    $battery.Width = 375
-    $battery.Height = 22
+    $battery.Name = 'BatteryLabel'; $battery.Left = 20; $battery.Top = 108; $battery.Width = 390; $battery.Height = 22
     $form.Controls.Add($battery)
 
-    $keepAwake = New-Object System.Windows.Forms.CheckBox
-    $keepAwake.Name = 'KeepComputerAwake'
-    $keepAwake.Text = 'Keep computer awake'
-    $keepAwake.Left = 20
-    $keepAwake.Top = 125
-    $keepAwake.Width = 350
-    $keepAwake.Checked = [bool]$script:Settings.KeepComputerAwake
-    $form.Controls.Add($keepAwake)
+    $policy = New-Object System.Windows.Forms.Label
+    $policy.Name = 'PolicyLabel'; $policy.Left = 20; $policy.Top = 132; $policy.Width = 390; $policy.Height = 35
+    $form.Controls.Add($policy)
 
-    $batteryProtection = New-Object System.Windows.Forms.CheckBox
-    $batteryProtection.Name = 'ProtectOnBattery'
-    $batteryProtection.Text = 'Protect on battery'
-    $batteryProtection.Left = 20
-    $batteryProtection.Top = 155
-    $batteryProtection.Width = 350
-    $batteryProtection.Checked = [bool]$script:Settings.ProtectOnBattery
-    $form.Controls.Add($batteryProtection)
-
-    $lid = New-Object System.Windows.Forms.CheckBox
-    $lid.Name = 'LidProtection'
-    $lid.Text = 'Keep running with lid closed (integration phase pending)'
-    $lid.Left = 20
-    $lid.Top = 185
-    $lid.Width = 370
-    $lid.Checked = [bool]$script:Settings.LidProtection
-    $lid.Enabled = $false
-    $form.Controls.Add($lid)
-
-    $restart = New-Object System.Windows.Forms.CheckBox
-    $restart.Name = 'BlockRestart'
-    $restart.Text = 'Block normal automatic restart/shutdown'
-    $restart.Left = 20
-    $restart.Top = 215
-    $restart.Width = 360
-    $restart.Checked = [bool]$script:Settings.BlockRestart
-    $form.Controls.Add($restart)
-
-    $display = New-Object System.Windows.Forms.CheckBox
-    $display.Name = 'KeepDisplayOn'
-    $display.Text = 'Keep display on (normally leave OFF)'
-    $display.Left = 20
-    $display.Top = 245
-    $display.Width = 350
-    $display.Checked = [bool]$script:Settings.KeepDisplayOn
-    $form.Controls.Add($display)
-
-    $autostart = New-Object System.Windows.Forms.CheckBox
-    $autostart.Name = 'StartWithWindows'
-    $autostart.Text = 'Start with Windows'
-    $autostart.Left = 20
-    $autostart.Top = 275
-    $autostart.Width = 350
-    $autostart.Checked = [bool]$script:Settings.StartWithWindows
-    $form.Controls.Add($autostart)
+    $items = @(
+        @('KeepComputerAwake', 'Keep computer awake', 170, [bool]$script:Settings.KeepComputerAwake),
+        @('ProtectOnBattery', 'Protect on battery', 200, [bool]$script:Settings.ProtectOnBattery),
+        @('LidProtection', 'Keep running with lid closed', 230, [bool]$script:Settings.LidProtection),
+        @('BlockRestart', 'Block normal automatic restart/shutdown', 260, [bool]$script:Settings.BlockRestart),
+        @('KeepDisplayOn', 'Keep display on (normally leave OFF)', 290, [bool]$script:Settings.KeepDisplayOn),
+        @('StartWithWindows', 'Start with Windows', 320, [bool]$script:Settings.StartWithWindows)
+    )
+    foreach ($item in $items) {
+        $box = New-Object System.Windows.Forms.CheckBox
+        $box.Name = $item[0]; $box.Text = $item[1]; $box.Left = 20; $box.Top = $item[2]; $box.Width = 390; $box.Checked = $item[3]
+        $form.Controls.Add($box)
+    }
 
     $thresholdLabel = New-Object System.Windows.Forms.Label
-    $thresholdLabel.Text = 'Battery Safety threshold:'
-    $thresholdLabel.Left = 20
-    $thresholdLabel.Top = 313
-    $thresholdLabel.Width = 190
+    $thresholdLabel.Text = 'Battery Safety threshold:'; $thresholdLabel.Left = 20; $thresholdLabel.Top = 360; $thresholdLabel.Width = 190
     $form.Controls.Add($thresholdLabel)
 
     $threshold = New-Object System.Windows.Forms.NumericUpDown
-    $threshold.Name = 'BatterySafetyPercent'
-    $threshold.Left = 215
-    $threshold.Top = 310
-    $threshold.Width = 65
-    $threshold.Minimum = 5
-    $threshold.Maximum = 50
-    $threshold.Value = [decimal]$script:Settings.BatterySafetyPercent
+    $threshold.Name = 'BatterySafetyPercent'; $threshold.Left = 215; $threshold.Top = 357; $threshold.Width = 65
+    $threshold.Minimum = 5; $threshold.Maximum = 50; $threshold.Value = [decimal]$script:Settings.BatterySafetyPercent
     $form.Controls.Add($threshold)
 
-    $percentLabel = New-Object System.Windows.Forms.Label
-    $percentLabel.Text = '%'
-    $percentLabel.Left = 285
-    $percentLabel.Top = 313
-    $percentLabel.Width = 30
-    $form.Controls.Add($percentLabel)
+    $percent = New-Object System.Windows.Forms.Label
+    $percent.Text = '%'; $percent.Left = 285; $percent.Top = 360; $percent.Width = 30
+    $form.Controls.Add($percent)
 
     $save = New-Object System.Windows.Forms.Button
-    $save.Text = 'Apply Settings'
-    $save.Left = 20
-    $save.Top = 355
-    $save.Width = 120
-    $save.Height = 30
+    $save.Text = 'Apply Settings'; $save.Left = 20; $save.Top = 400; $save.Width = 120; $save.Height = 30
     $save.add_Click({ Save-WnsSettingsFromForm })
     $form.Controls.Add($save)
 
     $startStop = New-Object System.Windows.Forms.Button
-    $startStop.Name = 'StartStopButton'
-    $startStop.Left = 150
-    $startStop.Top = 355
-    $startStop.Width = 125
-    $startStop.Height = 30
+    $startStop.Name = 'StartStopButton'; $startStop.Left = 150; $startStop.Top = 400; $startStop.Width = 125; $startStop.Height = 30
     $startStop.add_Click({
         if ($script:State.Status -eq 'PROTECTED' -or $script:State.Status -eq 'DEGRADED') {
             Stop-WnsProtection -UserInitiated
@@ -655,20 +589,13 @@ function New-WnsSettingsForm {
     $form.Controls.Add($startStop)
 
     $exit = New-Object System.Windows.Forms.Button
-    $exit.Text = 'Exit'
-    $exit.Left = 285
-    $exit.Top = 355
-    $exit.Width = 105
-    $exit.Height = 30
+    $exit.Text = 'Exit'; $exit.Left = 285; $exit.Top = 400; $exit.Width = 125; $exit.Height = 30
     $exit.add_Click({ Exit-WnsApplication })
     $form.Controls.Add($exit)
 
     $note = New-Object System.Windows.Forms.Label
-    $note.Text = 'Display may turn off by default. Lid/sleep-policy transaction is not active in this dev phase.'
-    $note.Left = 20
-    $note.Top = 400
-    $note.Width = 370
-    $note.Height = 40
+    $note.Text = 'Display may turn off. Temporary lid/DC sleep changes are snapshotted before write and restored on Stop, Battery Safety, Exit, next launch, or recovery RunOnce.'
+    $note.Left = 20; $note.Top = 445; $note.Width = 390; $note.Height = 48
     $form.Controls.Add($note)
 
     $form.add_FormClosing({
@@ -678,7 +605,6 @@ function New-WnsSettingsForm {
             $sender.Hide()
         }
     })
-
     return $form
 }
 
@@ -686,7 +612,6 @@ function Show-WnsSettings {
     if ($null -eq $script:SettingsForm -or $script:SettingsForm.IsDisposed) {
         $script:SettingsForm = New-WnsSettingsForm
     }
-
     Update-WnsSettingsView
     $script:SettingsForm.Show()
     $script:SettingsForm.WindowState = [System.Windows.Forms.FormWindowState]::Normal
@@ -694,54 +619,60 @@ function Show-WnsSettings {
 }
 
 function Exit-WnsApplication {
-    if ($script:Exiting) {
-        return
-    }
+    if ($script:Exiting) { return }
 
     $script:Exiting = $true
     try {
         if ($script:State.Status -ne 'EXITING') {
-            $script:State = Set-WnsState -State $script:State -Status 'EXITING' -Reason 'Application exit requested.'
+            Set-WnsRuntimeState -Status 'EXITING' -Reason 'Application exit requested; restoring temporary policy.'
         }
-        Write-WnsLog -Paths $script:Paths -Message 'Application exiting; releasing owned requests.'
+        [void](Restore-WnsOwnedPolicy -Reason 'application exit')
         Disable-WnsShutdownGuard
         Disable-WnsPowerRequests
+        $script:CoreProtectionActive = $false
     }
     finally {
-        if ($null -ne $script:BatteryTimer) {
-            $script:BatteryTimer.Stop()
-        }
-        if ($null -ne $script:OpenTimer) {
-            $script:OpenTimer.Stop()
-        }
-        if ($null -ne $script:NotifyIcon) {
-            $script:NotifyIcon.Visible = $false
-        }
-        if ($null -ne $script:SettingsForm -and -not $script:SettingsForm.IsDisposed) {
-            $script:SettingsForm.Dispose()
-        }
-        if ($null -ne $script:HostForm -and -not $script:HostForm.IsDisposed) {
-            $script:HostForm.Dispose()
-        }
+        if ($null -ne $script:BatteryTimer) { $script:BatteryTimer.Stop() }
+        if ($null -ne $script:OpenTimer) { $script:OpenTimer.Stop() }
+        if ($null -ne $script:NotifyIcon) { $script:NotifyIcon.Visible = $false }
+        if ($null -ne $script:SettingsForm -and -not $script:SettingsForm.IsDisposed) { $script:SettingsForm.Dispose() }
+        if ($null -ne $script:HostForm -and -not $script:HostForm.IsDisposed) { $script:HostForm.Dispose() }
         [System.Windows.Forms.Application]::ExitThread()
     }
 }
 
-# Single-instance ownership. A second launch signals the existing process to open Settings.
+# Single-instance ownership also serializes crash/reboot recovery. A recovery-only
+# process never restores policy out from under an already running normal owner.
 $mutexCreated = $false
 $script:Mutex = New-Object System.Threading.Mutex($true, 'Local\WindowsNoSleep.Singleton', [ref]$mutexCreated)
 $openEventName = 'Local\WindowsNoSleep.OpenSettings'
 
 if (-not $mutexCreated) {
-    try {
-        $existingEvent = [System.Threading.EventWaitHandle]::OpenExisting($openEventName)
-        [void]$existingEvent.Set()
-        $existingEvent.Dispose()
-    }
-    catch {
-        # Existing instance may be starting or stopping. Do not spawn a competing owner.
+    if (-not $RecoveryOnly) {
+        try {
+            $existingEvent = [System.Threading.EventWaitHandle]::OpenExisting($openEventName)
+            [void]$existingEvent.Set()
+            $existingEvent.Dispose()
+        }
+        catch {}
     }
     exit 0
+}
+
+if ($RecoveryOnly) {
+    try {
+        Write-WnsLog -Paths $script:Paths -Message 'Recovery-only startup invoked.'
+        [void](Restore-WnsOwnedPolicy -Reason 'RunOnce recovery' -ThrowOnFailure)
+        Write-WnsLog -Paths $script:Paths -Message 'Recovery-only startup completed.'
+        exit 0
+    }
+    finally {
+        try {
+            $script:Mutex.ReleaseMutex()
+            $script:Mutex.Dispose()
+        }
+        catch {}
+    }
 }
 
 $script:OpenSettingsEvent = New-Object System.Threading.EventWaitHandle(
@@ -755,10 +686,14 @@ try {
 
     $recoveryStatus = Get-WnsRecoveryStatus -Paths $script:Paths
     if ($recoveryStatus.Status -eq 'Pending') {
-        Write-WnsLog -Paths $script:Paths -Level 'WARN' -Message 'A pending recovery snapshot exists. No new power-policy mutation is implemented in this phase.'
+        Set-WnsRuntimeState -Status 'RECOVERING_PREVIOUS_STATE' -Reason 'Restoring temporary policy left by a prior interrupted session.'
+        [void](Restore-WnsOwnedPolicy -Reason 'startup recovery' -ThrowOnFailure)
     }
     elseif ($recoveryStatus.Status -eq 'Corrupt') {
-        Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Recovery snapshot is corrupt: $($recoveryStatus.Error)"
+        throw "Recovery data is corrupt. Protection will not start because exact restoration cannot be proven: $($recoveryStatus.Error)"
+    }
+    else {
+        Disable-WnsRecoveryRunOnce
     }
 
     $script:HostForm = New-Object WindowsNoSleep.Interop.ShutdownHostForm
@@ -769,7 +704,7 @@ try {
 
     $contextMenu = New-Object System.Windows.Forms.ContextMenuStrip
     $openMenu = $contextMenu.Items.Add('Open Settings')
-    $toggleMenu = $contextMenu.Items.Add('Stop Protection')
+    $script:ToggleMenu = $contextMenu.Items.Add('Stop Protection')
     [void]$contextMenu.Items.Add('-')
     $exitMenu = $contextMenu.Items.Add('Exit')
 
@@ -781,15 +716,13 @@ try {
 
     $openMenu.add_Click({ Show-WnsSettings })
     $exitMenu.add_Click({ Exit-WnsApplication })
-    $toggleMenu.add_Click({
+    $script:ToggleMenu.add_Click({
         if ($script:State.Status -eq 'PROTECTED' -or $script:State.Status -eq 'DEGRADED') {
             Stop-WnsProtection -UserInitiated
-            $toggleMenu.Text = 'Start Protection'
         }
         else {
             $script:UserStopped = $false
             Start-WnsProtection
-            $toggleMenu.Text = 'Stop Protection'
         }
     })
 
@@ -803,33 +736,50 @@ try {
     $script:OpenTimer = New-Object System.Windows.Forms.Timer
     $script:OpenTimer.Interval = 400
     $script:OpenTimer.add_Tick({
-        if ($script:OpenSettingsEvent.WaitOne(0)) {
-            Show-WnsSettings
-        }
+        if ($script:OpenSettingsEvent.WaitOne(0)) { Show-WnsSettings }
     })
     $script:OpenTimer.Start()
 
     $script:BatteryTimer = New-Object System.Windows.Forms.Timer
     $script:BatteryTimer.Interval = 5000
     $script:BatteryTimer.add_Tick({
-        $battery = Get-WnsBatterySnapshot
-        $threshold = Get-WnsBatteryThreshold
+        try {
+            $battery = Get-WnsBatterySnapshot
+            $threshold = Get-WnsBatteryThreshold
 
-        if ($battery.HasBattery -and -not $battery.OnAC) {
-            if ((-not $script:Settings.ProtectOnBattery) -or ($null -ne $battery.Percent -and $battery.Percent -le $threshold)) {
-                if ($script:State.Status -ne 'BATTERY_SAFETY') {
-                    Enter-WnsBatterySafety
+            if (-not $script:UserStopped -and [bool]$script:Settings.KeepComputerAwake) {
+                if ($battery.HasBattery -and -not $battery.OnAC -and (
+                    (-not [bool]$script:Settings.ProtectOnBattery) -or
+                    ($null -ne $battery.Percent -and $battery.Percent -le $threshold)
+                )) {
+                    if ($script:State.Status -ne 'BATTERY_SAFETY') { Enter-WnsBatterySafety }
                 }
-            }
-            elseif ($script:State.Status -eq 'BATTERY_SAFETY' -and -not $script:UserStopped) {
-                $resumeThreshold = [Math]::Min(100, $threshold + 5)
-                if ($null -ne $battery.Percent -and $battery.Percent -ge $resumeThreshold) {
-                    Start-WnsProtection -AutomaticResume
+                elseif ($script:State.Status -eq 'BATTERY_SAFETY') {
+                    $resumeThreshold = [Math]::Min(100, $threshold + 5)
+                    if ($battery.OnAC -or ($null -ne $battery.Percent -and $battery.Percent -ge $resumeThreshold)) {
+                        Start-WnsProtection -AutomaticResume
+                    }
+                }
+                elseif ($script:CoreProtectionActive -and $battery.HasBattery) {
+                    try {
+                        Sync-WnsOwnedPolicy
+                        if ($script:State.Status -eq 'DEGRADED') {
+                            Set-WnsRuntimeState -Status 'PROTECTED' -Reason 'System power request and temporary runtime policy are healthy.'
+                        }
+                    }
+                    catch {
+                        if ($script:State.Status -ne 'DEGRADED') {
+                            Set-WnsRuntimeState -Status 'DEGRADED' -Reason "System request remains active, but runtime policy sync failed: $($_.Exception.Message)"
+                        }
+                        else {
+                            Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Runtime policy sync retry failed: $($_.Exception.Message)"
+                        }
+                    }
                 }
             }
         }
-        elseif ($battery.OnAC -and $script:State.Status -eq 'BATTERY_SAFETY' -and -not $script:UserStopped) {
-            Start-WnsProtection -AutomaticResume
+        catch {
+            Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Battery/runtime timer error: $($_.Exception.Message)"
         }
 
         Update-WnsTrayState
@@ -837,7 +787,7 @@ try {
     })
     $script:BatteryTimer.Start()
 
-    if ($script:Settings.KeepComputerAwake) {
+    if ([bool]$script:Settings.KeepComputerAwake) {
         Start-WnsProtection
     }
     else {
@@ -848,12 +798,7 @@ try {
     [System.Windows.Forms.Application]::Run()
 }
 catch {
-    try {
-        Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Fatal error: $($_.Exception.ToString())"
-    }
-    catch {
-    }
-
+    try { Write-WnsLog -Paths $script:Paths -Level 'ERROR' -Message "Fatal error: $($_.Exception.ToString())" } catch {}
     try {
         [System.Windows.Forms.MessageBox]::Show(
             "Windows No Sleep could not start.`r`n`r`n$($_.Exception.Message)",
@@ -862,10 +807,10 @@ catch {
             [System.Windows.Forms.MessageBoxIcon]::Error
         ) | Out-Null
     }
-    catch {
-    }
+    catch {}
 }
 finally {
+    try { [void](Restore-WnsOwnedPolicy -Reason 'final process cleanup') } catch {}
     try { Disable-WnsShutdownGuard } catch {}
     try { Disable-WnsPowerRequests } catch {}
     try {
@@ -875,12 +820,7 @@ finally {
         }
     }
     catch {}
-    try {
-        if ($null -ne $script:OpenSettingsEvent) {
-            $script:OpenSettingsEvent.Dispose()
-        }
-    }
-    catch {}
+    try { if ($null -ne $script:OpenSettingsEvent) { $script:OpenSettingsEvent.Dispose() } } catch {}
     try {
         if ($null -ne $script:Mutex) {
             $script:Mutex.ReleaseMutex()
