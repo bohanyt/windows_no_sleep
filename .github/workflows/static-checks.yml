@@ -32,6 +32,11 @@ jobs:
         run: |
           & .\tests\PolicyTransactionTests.ps1
 
+      - name: Run runtime policy lifecycle tests
+        shell: powershell
+        run: |
+          & .\tests\RuntimePolicyTests.ps1
+
       - name: Run hosted Windows non-mutating E2E
         shell: powershell
         run: |
