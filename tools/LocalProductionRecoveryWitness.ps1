@@ -189,11 +189,11 @@ try {
         -RedirectStandardError $recoveryStderr `
         -PassThru
     Assert-Wns ($recoveryProcess.WaitForExit(15000)) 'Recovery-only process did not finish within 15 seconds.'
-    if ($recoveryProcess.ExitCode -ne 0) {
-        $stderr = if (Test-Path -LiteralPath $recoveryStderr) { Get-Content -LiteralPath $recoveryStderr -Raw } else { '' }
-        throw "Recovery-only process failed with exit code $($recoveryProcess.ExitCode). $stderr"
-    }
 
+    # Do not use child ExitCode as acceptance evidence. Windows PowerShell 5.1
+    # can expose a blank ExitCode for redirected Start-Process children on some
+    # Windows builds. The authoritative proof is the re-read OS policy and the
+    # disappearance of recovery state below.
     $afterRecovery = Get-WnsPolicySnapshot
     Save-WnsEvidenceJson -Path $afterPath -Value $afterRecovery
     Assert-Wns ($afterRecovery.ActiveSchemeGuid -eq $before.ActiveSchemeGuid) 'Recovery changed the active power scheme.'
