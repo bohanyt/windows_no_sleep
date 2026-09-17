@@ -35,7 +35,39 @@ Do not:
 - rerun the quarantined path on the affected endpoint;
 - claim release-package/EDR compatibility.
 
-Next engineering step is to redesign or repackage the recovery/runtime path so the exact-restore safety contract remains intact without relying on an EDR-hostile combination. Candidate directions must be evaluated against Issue #3 and the original owner preference for portable/simple deployment; do not weaken recovery safety just to reduce detections.
+Next engineering step is to redesign or repackage the recovery/runtime path so the exact-restore safety contract remains intact. Candidate directions must be evaluated against Issue #3 and the original owner preference for portable/simple deployment; do not weaken recovery safety just to reduce detections.
+
+### Issue #3 remediation proposal — owner approval pending
+
+Durable proposal: `docs/ISSUE_003_EDR_PLAN.md` on `main`.
+
+Status: **PROPOSED, not implementation or local-execution authority**.
+
+Recommended direction:
+
+- conventional portable C# WinForms / .NET Framework 4.8 executable, with no PowerShell runtime wrapper;
+- a small non-mutating compiled pilot before porting all features;
+- trusted release signing/provenance as a target, not a claim of an available certificate or guaranteed antivirus acceptance;
+- preserve exact recovery and validate one transparent, documented direct-EXE recovery mechanism before enabling real lid/DC mutations;
+- do not treat removal of RunOnce, a different extension or a new startup mechanism as a proven fix;
+- preserve final V1 goals; the non-mutating pilot is not approval to silently drop lid/DC requirements;
+- one implementation lane; no swarm.
+
+Additional source-level safety finding at `8059f92f51702c35646e94c8b1afe1e1e3c96934`:
+
+- `tests/WindowsIntegrationTests.ps1` launches the real app with default settings, force-kills it, and unconditionally deletes its temporary runtime directory;
+- it does not prevent laptop policy writes before launch or verify policy restoration before deleting possible recovery data;
+- hosted no-battery CI success therefore does not establish that this test is non-mutating on a laptop;
+- this is a reviewed upstream safety risk, not a claim that the reporter's machine definitely retained changed settings.
+
+Next bounded actions after owner review:
+
+1. obtain existing EDR alert details, exact tested contributor SHA and approved read-only current Windows/recovery state; do not reproduce the quarantine;
+2. harden test isolation and recovery-data preservation before new real-policy testing;
+3. if approved, build the small compiled pilot and validate its exact artifact before the rest of the port;
+4. independently review recovery/sign-in semantics and reauthorize physical tests only through a new exact-SHA dispatch.
+
+No implementation source was changed for this proposal. Local Cursor remains **HOLD / no new dispatch**. No certificate purchase, security exclusion, endpoint script execution or new policy mutation is authorized by the proposal.
 
 ### Previously verified physical evidence
 
@@ -43,10 +75,15 @@ Next engineering step is to redesign or repackage the recovery/runtime path so t
 - `LOCAL_POLICY_TRANSACTION_VERIFIED` — real `SleepIdle DC 1200 -> 0 -> 1200` exact restore passed.
 - `LID_CLOSED_AC_EXTERNAL_DISPLAY_VERIFIED` — lid closed on AC for ~90s with external monitor connected; workload heartbeat continued with max gap ~1.046s.
 
+These passes remain evidence for their original tested builds, not automatic verification of a future compiled port.
+
 ### Still open
 
 - Issue #3 EDR compatibility/root-cause redesign;
-- production crash-recovery lifecycle after EDR-safe redesign;
+- affected-endpoint policy/recovery reconciliation if necessary;
+- hosted-test mutation/cleanup hazard;
+- owner approval of the proposed compiled packaging;
+- production crash-recovery lifecycle after redesign;
 - clean Stop/Exit exact restore witness;
 - `BATTERY_VERIFIED`;
 - `HEADLESS_VERIFIED`;
