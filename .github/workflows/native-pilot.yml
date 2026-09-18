@@ -1,0 +1,63 @@
+name: native-pilot
+
+on:
+  push:
+    branches:
+      - feat/v1-native-winforms
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-self-test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build native Release x64
+        shell: powershell
+        run: |
+          msbuild .\native\WindowsNoSleep\WindowsNoSleep.csproj /m /t:Rebuild /p:Configuration=Release /p:Platform=x64
+
+      - name: Run non-mutating native self-test
+        shell: powershell
+        run: |
+          $exe = Resolve-Path .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            throw "Native self-test failed with exit code $($process.ExitCode)."
+          }
+          Write-Host 'NATIVE_PILOT_SELF_TEST_PASS'
+
+      - name: Package unsigned pilot and record SHA-256
+        shell: powershell
+        run: |
+          $out = '.\artifacts\native-pilot'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe $out
+          if (Test-Path .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe.config) {
+            Copy-Item .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe.config $out
+          }
+          Copy-Item .\native\README_NATIVE_PILOT.md $out\README.txt
+
+          $hash = Get-FileHash $out\WindowsNoSleep.exe -Algorithm SHA256
+          "$($hash.Hash)  WindowsNoSleep.exe" | Set-Content $out\SHA256SUMS.txt -Encoding ascii
+          "Native pilot SHA-256: $($hash.Hash)" | Add-Content $env:GITHUB_STEP_SUMMARY
+          "Signing status: UNSIGNED PILOT" | Add-Content $env:GITHUB_STEP_SUMMARY
+
+          Compress-Archive -Path "$out\*" -DestinationPath .\artifacts\WindowsNoSleep-native-pilot.zip -Force
+
+      - name: Upload exact pilot artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindowsNoSleep-native-pilot
+          path: |
+            artifacts/WindowsNoSleep-native-pilot.zip
+            artifacts/native-pilot/SHA256SUMS.txt
+          if-no-files-found: error
