@@ -123,3 +123,13 @@ If the exact native pilot is accepted, continue porting the remaining V1 feature
 - longer Modern Standby/overnight soak;
 - final protected-endpoint package acceptance and any later signing/deployment decision;
 - independent release review before native PR is ready/merged.
+
+
+### Native pilot local dispatch
+
+`docs/LOCAL_NATIVE_PILOT_DISPATCH_001.md` is now **AUTHORIZED** for one non-mutating protected-endpoint compatibility test using the exact CI artifact from run `35203872675` / source head `46d99c00c276266b5e53be31fa19eedebadc9990`.
+
+The test keeps normal endpoint security enabled, requires the exact EXE SHA-256 `4EC31D00B718A541021773590423A9385895FBA812964F3912C2983C55F2FB51`, and exercises only tray launch, Protected -> Stopped -> Protected, and Exit. It authorizes no power-policy mutation, registry persistence, elevation, security exclusion, battery/lid test, or recovery test.
+
+Any warning/block/quarantine immediately stops the trial; do not rerun or whitelist.
+
