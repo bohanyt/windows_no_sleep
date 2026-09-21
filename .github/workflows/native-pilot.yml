@@ -51,13 +51,9 @@ jobs:
           "Native pilot SHA-256: $($hash.Hash)" | Add-Content $env:GITHUB_STEP_SUMMARY
           "Signing status: UNSIGNED PILOT" | Add-Content $env:GITHUB_STEP_SUMMARY
 
-          Compress-Archive -Path "$out\*" -DestinationPath .\artifacts\WindowsNoSleep-native-pilot.zip -Force
-
       - name: Upload exact pilot artifact
         uses: actions/upload-artifact@v4
         with:
           name: WindowsNoSleep-native-pilot
-          path: |
-            artifacts/WindowsNoSleep-native-pilot.zip
-            artifacts/native-pilot/SHA256SUMS.txt
+          path: artifacts/native-pilot
           if-no-files-found: error
