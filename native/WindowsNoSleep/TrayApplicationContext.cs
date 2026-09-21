@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.Diagnostics;
+using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -49,7 +51,9 @@ namespace WindowsNoSleep
             var platform = new WindowsPowerPlatform();
             var store = new NativeJournalStore(directory, machine, RuntimeStorage.UserId);
             var transaction = new PolicyTransaction(platform, store, _storage.Log);
-            _screenSaver = new ScreenSaverProtection(new WindowsScreenSaverPlatform(), new ScreenSaverJournalStore(directory), _storage.Log);
+            var desktopPlatform = new WindowsScreenSaverPlatform();
+            _screenSaver = new ScreenSaverProtection(desktopPlatform, new ScreenSaverJournalStore(directory), _storage.Log,
+                desktopPlatform, new MachineInactivityJournalStore(directory, machine, RuntimeStorage.UserId));
             _lifecycle = new ShutdownWindow(_storage.Log);
             Controller = new ProtectionController(options, platform, transaction, _lifecycle,
                 delegate { return PowerRequestLease.AcquireSystemRequired("Windows No Sleep is keeping computer workloads active while allowing the display to turn off."); }, _storage.Log, _screenSaver);
@@ -143,6 +147,39 @@ namespace WindowsNoSleep
         {
             Startup.SetEnabled(enabled);
             _storage.Log("AUTOSTART enabled=" + enabled);
+        }
+        internal bool NeedsAdministratorForIdleLock
+        {
+            get
+            {
+                string warning = Controller.ScreenSaverWarning;
+                return warning != null && warning.IndexOf("administrator", StringComparison.OrdinalIgnoreCase) >= 0;
+            }
+        }
+        internal void RestartAsAdministrator()
+        {
+            Controller.Stop();
+            if (Controller.RecoveryPending)
+            {
+                MessageBox.Show("Original settings still need recovery. Run the current executable as administrator manually so Windows No Sleep can restore them before continuing.",
+                    "Windows No Sleep", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            try
+            {
+                Process.Start(new ProcessStartInfo(Application.ExecutablePath)
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
+                });
+                ExitThread();
+            }
+            catch (Win32Exception error)
+            {
+                if ((error.NativeErrorCode & 0xffff) != 1223)
+                    MessageBox.Show(error.Message, "Windows No Sleep", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
         }
         internal void ShowSettings()
         {

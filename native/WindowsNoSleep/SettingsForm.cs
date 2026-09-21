@@ -10,7 +10,7 @@ namespace WindowsNoSleep
         private readonly Label _status, _power, _policy, _desktop;
         private readonly CheckBox _screenSaver, _onBattery, _lid, _timeouts, _shutdown, _startup;
         private readonly NumericUpDown _threshold;
-        private readonly Button _toggle;
+        private readonly Button _toggle, _admin;
         private bool _binding;
 
         internal SettingsForm(TrayApplicationContext context)
@@ -27,9 +27,12 @@ namespace WindowsNoSleep
             layout.Controls.Add(new Label { Text = "Windows No Sleep", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 0, 0, 12) });
             _status = Paragraph(); _desktop = Paragraph(); _power = Paragraph(); _policy = Paragraph();
             layout.Controls.Add(_status); layout.Controls.Add(_desktop); layout.Controls.Add(_power); layout.Controls.Add(_policy);
-            _screenSaver = Option("Prevent screensaver and its automatic sign-in prompt");
+            _screenSaver = Option("Prevent screensaver and automatic idle lock");
             layout.Controls.Add(_screenSaver);
-            layout.Controls.Add(Paragraph("Manual lock and enforced Windows lock policy still apply. Your display may turn off without the computer sleeping."));
+            layout.Controls.Add(Paragraph("If a local machine inactivity limit is configured, run as administrator so Windows No Sleep can temporarily set it to Never and restore it later. Domain/MDM policy may reapply it."));
+            _admin = new Button { Text = "Restart as administrator", AutoSize = true, MinimumSize = new Size(180, 30), Visible = false };
+            _admin.Click += delegate { _context.RestartAsAdministrator(); };
+            layout.Controls.Add(_admin);
             _onBattery = Option("Keep protecting while on battery");
             _lid = Option("Keep running when the lid is closed");
             _timeouts = Option("Prevent battery sleep / hibernate timeouts");
@@ -113,6 +116,7 @@ namespace WindowsNoSleep
                     + "\nRestart guard: " + (core.GuardActive ? "Active - Windows can override it" : "Off")
                     + (_context.StartupWarning == null ? "" : "\n" + _context.StartupWarning);
                 _screenSaver.Checked = core.Options.PreventScreenSaver != false;
+                _admin.Visible = _context.NeedsAdministratorForIdleLock;
                 _onBattery.Checked = core.Options.ProtectOnBattery;
                 _lid.Checked = core.Options.LidProtection;
                 _timeouts.Checked = core.Options.DcTimeoutProtection;

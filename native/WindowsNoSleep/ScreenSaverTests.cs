@@ -11,22 +11,67 @@ namespace WindowsNoSleep
     // power policy, passwords or registry are changed by --test-suite.
     internal static class ScreenSaverTests
     {
-        private sealed class Desktop : IScreenSaverPlatform
+        private sealed class Desktop : IScreenSaverPlatform, IMachineInactivityPlatform
         {
             internal bool Enabled = true, Managed, IgnoreWrite, ThrowAfterDisable, FailRestore;
+            internal bool Elevated, MachineExists, FailMachineWrite, FailMachineRestore;
+            internal uint MachineSeconds;
             internal string Stamp = "profile-unchanged", UserId = "test-user", LogonId = "test-logon", LockWarning;
-            internal int Writes;
+            internal int Writes, MachineWrites;
             internal readonly List<string> Trace = new List<string>();
             public string User { get { return UserId; } }
             public string Logon { get { return LogonId; } }
-            public ScreenSaverState Read() { return new ScreenSaverState { Enabled = Enabled, Secure = true, Timeout = 60,
-                SettingsManaged = Managed, ProfileStamp = Stamp, LockWarning = LockWarning }; }
+            public ScreenSaverState Read()
+            {
+                string warning = LockWarning;
+                if (MachineExists && MachineSeconds > 0)
+                {
+                    string policy = "Windows machine inactivity policy requires lock after " + MachineSeconds
+                        + " seconds. Run Windows No Sleep as administrator to temporarily disable it while Protection is active.";
+                    warning = string.IsNullOrWhiteSpace(warning) ? policy : warning + " " + policy;
+                }
+                return new ScreenSaverState { Enabled = Enabled, Secure = true, Timeout = 60,
+                    SettingsManaged = Managed, ProfileStamp = Stamp, LockWarning = warning };
+            }
             public void SetActive(bool enabled)
             {
                 if (enabled && FailRestore) throw new IOException("restore denied");
                 Writes++; Trace.Add(enabled ? "enable" : "disable");
                 if (!IgnoreWrite) Enabled = enabled;
                 if (!enabled && ThrowAfterDisable) throw new IOException("interrupted after write");
+            }
+            public bool IsElevated { get { return Elevated; } }
+            public MachineInactivityState ReadMachineInactivity()
+            {
+                return new MachineInactivityState { Exists = MachineExists, Seconds = MachineSeconds };
+            }
+            public void SetMachineInactivity(uint seconds)
+            {
+                if (!Elevated) throw new UnauthorizedAccessException("admin required");
+                if (seconds == 0 && FailMachineWrite) throw new IOException("machine write failed");
+                if (seconds != 0 && FailMachineRestore) throw new IOException("machine restore failed");
+                MachineWrites++; Trace.Add("machine=" + seconds);
+                MachineExists = true; MachineSeconds = seconds;
+            }
+        }
+        private sealed class MachineStore : IMachineInactivityStore
+        {
+            internal MachineInactivityRecord Record;
+            internal bool FailSave, FailClear;
+            internal readonly List<string> Trace;
+            internal MachineStore(List<string> trace) { Trace = trace; }
+            public bool Exists { get { return Record != null; } }
+            public MachineInactivityRecord Load() { return Record; }
+            public void Save(MachineInactivityRecord record)
+            {
+                if (FailSave) throw new IOException("machine journal unavailable");
+                record.Machine = "test-machine"; record.User = "test-user"; record.Validate();
+                Trace.Add("machine-save"); Record = record;
+            }
+            public void Clear(MachineInactivityRecord record, string disposition)
+            {
+                if (FailClear) throw new IOException("machine receipt failed");
+                Trace.Add("machine-clear"); Record = null;
             }
         }
         private sealed class Store : IScreenSaverStore
@@ -52,9 +97,16 @@ namespace WindowsNoSleep
         {
             internal readonly Desktop Desktop = new Desktop();
             internal readonly Store Store;
+            internal readonly MachineStore MachineStore;
             internal readonly ScreenSaverProtection Protection;
-            internal Rig() { Store = new Store(Desktop.Trace); Protection = NewProtection(); }
-            internal ScreenSaverProtection NewProtection() { return new ScreenSaverProtection(Desktop, Store, delegate { }); }
+            internal Rig()
+            {
+                Store = new Store(Desktop.Trace); MachineStore = new MachineStore(Desktop.Trace); Protection = NewProtection();
+            }
+            internal ScreenSaverProtection NewProtection()
+            {
+                return new ScreenSaverProtection(Desktop, Store, delegate { }, Desktop, MachineStore);
+            }
         }
         private sealed class Sensor : IPowerSensor
         {
@@ -97,8 +149,11 @@ namespace WindowsNoSleep
             internal readonly Guard Guard = new Guard();
             internal readonly ProtectionController Core;
             internal int Leases;
-            internal CoreRig()
+            internal CoreRig(bool machinePolicy = false, bool elevated = false)
             {
+                Desktop.Desktop.MachineExists = machinePolicy;
+                Desktop.Desktop.MachineSeconds = machinePolicy ? 900u : 0u;
+                Desktop.Desktop.Elevated = elevated;
                 Core = new ProtectionController(new AppOptions { LidProtection = false, DcTimeoutProtection = false }, Sensor,
                     new PolicyTransaction(new PowerPolicy(), Store, delegate { }), Guard,
                     delegate { Leases++; return new Lease(delegate { Leases--; }); }, delegate { }, Desktop.Protection)
@@ -154,6 +209,41 @@ namespace WindowsNoSleep
             {
                 var r = new Rig(); r.Desktop.LockWarning = "Windows requires lock after 60 seconds"; r.Protection.Start(true);
                 Assert(r.Protection.Warning.Contains("60 seconds")); r.Protection.Restore();
+            });
+            test("local machine inactivity policy requires admin", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Protection.Start(true);
+                Assert(r.Protection.Active && r.Desktop.MachineSeconds == 900 && r.Desktop.MachineWrites == 0
+                    && r.Protection.Warning.Contains("administrator")); r.Protection.Restore();
+            });
+            test("admin temporarily disables and restores local machine inactivity policy", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true);
+                Assert(r.Desktop.MachineSeconds == 0 && r.MachineStore.Exists && r.Protection.Warning == null);
+                Assert(r.Desktop.Trace.IndexOf("machine-save") < r.Desktop.Trace.IndexOf("machine=0"));
+                r.Protection.Restore();
+                Assert(r.Desktop.MachineSeconds == 900 && !r.MachineStore.Exists);
+            });
+            test("machine inactivity restore failure preserves durable record", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true); r.Desktop.FailMachineRestore = true; Throws(r.Protection.Restore);
+                Assert(r.MachineStore.Exists && r.Desktop.MachineSeconds == 0);
+                r.Desktop.FailMachineRestore = false; r.Protection.Restore(); Assert(!r.MachineStore.Exists && r.Desktop.MachineSeconds == 900);
+            });
+            test("external machine inactivity value is not overwritten", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true); r.Desktop.MachineSeconds = 600; Throws(r.Protection.Restore);
+                Assert(r.MachineStore.Exists && r.Desktop.MachineSeconds == 600);
+            });
+            test("successor restores machine inactivity before applying a new session", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true); var successor = r.NewProtection(); successor.Start(true);
+                Assert(r.Desktop.MachineSeconds == 0 && r.MachineStore.Exists); successor.Restore();
+                Assert(r.Desktop.MachineSeconds == 900 && !r.MachineStore.Exists);
             });
             test("ignored Windows write cannot claim active", delegate { var r = new Rig(); r.Desktop.IgnoreWrite = true; r.Protection.Start(true); Assert(!r.Protection.Active && r.Protection.Warning != null && r.Desktop.Enabled); });
             test("failure after disable restores original", delegate { var r = new Rig(); r.Desktop.ThrowAfterDisable = true; r.Protection.Start(true); Assert(r.Desktop.Enabled && !r.Store.Exists && !r.Protection.Active); });
@@ -218,6 +308,18 @@ namespace WindowsNoSleep
                 var r = new CoreRig(); r.Core.Start(); var options = r.Core.Options.Copy(); options.PreventScreenSaver = false;
                 r.Core.ChangeOptions(options, delegate { Assert(r.Desktop.Desktop.Enabled && !r.Desktop.Store.Exists); });
                 Assert(r.Desktop.Desktop.Enabled && r.Core.IsAwake); r.Core.Stop();
+            });
+            test("controller elevated local inactivity override is Protected", delegate
+            {
+                var r = new CoreRig(true, true); r.Core.Start();
+                Assert(r.Core.State == ProtectionState.Protected && r.Desktop.Desktop.MachineSeconds == 0);
+                r.Core.Stop(); Assert(r.Desktop.Desktop.MachineSeconds == 900);
+            });
+            test("controller non-admin local inactivity policy is Degraded", delegate
+            {
+                var r = new CoreRig(true, false); r.Core.Start();
+                Assert(r.Core.State == ProtectionState.Degraded && r.Core.Detail.Contains("administrator"));
+                r.Core.Stop();
             });
             test("controller managed lock warning yields Degraded", delegate
             {
