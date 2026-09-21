@@ -12,6 +12,7 @@
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
     <Deterministic>true</Deterministic>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\WindowsNoSleep.ico</ApplicationIcon>
   </PropertyGroup>
 
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
@@ -55,6 +56,8 @@
 
   <ItemGroup>
     <None Include="App.config" />
+    <Content Include="Assets\WindowsNoSleep.ico" />
+    <None Include="Assets\WindowsNoSleep.svg" />
     <None Include="app.manifest" />
   </ItemGroup>
 

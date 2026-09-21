@@ -7,6 +7,7 @@ namespace WindowsNoSleep
     internal sealed class TrayApplicationContext : ApplicationContext, IDisposable
     {
         private readonly NotifyIcon _notifyIcon;
+        private readonly Icon _applicationIcon;
         private readonly ToolStripMenuItem _toggleItem;
         private SettingsForm _settingsForm;
         private PowerRequestLease _powerRequest;
@@ -15,6 +16,7 @@ namespace WindowsNoSleep
 
         internal TrayApplicationContext()
         {
+            _applicationIcon = LoadApplicationIcon();
             var menu = new ContextMenuStrip();
             var openItem = new ToolStripMenuItem("Open Settings", null, delegate { ShowSettings(); });
             _toggleItem = new ToolStripMenuItem("Stop Protection", null, delegate { ToggleProtection(); });
@@ -28,7 +30,7 @@ namespace WindowsNoSleep
             _notifyIcon = new NotifyIcon
             {
                 ContextMenuStrip = menu,
-                Icon = SystemIcons.Application,
+                Icon = _applicationIcon,
                 Text = "Windows No Sleep - Starting",
                 Visible = true
             };
@@ -127,19 +129,16 @@ namespace WindowsNoSleep
         {
             if (IsProtected)
             {
-                _notifyIcon.Icon = SystemIcons.Application;
                 _notifyIcon.Text = "Windows No Sleep - Protected";
                 _toggleItem.Text = "Stop Protection";
             }
             else if (!string.IsNullOrWhiteSpace(_lastError))
             {
-                _notifyIcon.Icon = SystemIcons.Warning;
                 _notifyIcon.Text = "Windows No Sleep - Degraded";
                 _toggleItem.Text = "Start Protection";
             }
             else
             {
-                _notifyIcon.Icon = SystemIcons.Information;
                 _notifyIcon.Text = "Windows No Sleep - Stopped";
                 _toggleItem.Text = "Start Protection";
             }
@@ -147,6 +146,19 @@ namespace WindowsNoSleep
             if (_settingsForm != null && !_settingsForm.IsDisposed)
             {
                 _settingsForm.RefreshState();
+            }
+        }
+
+        private static Icon LoadApplicationIcon()
+        {
+            try
+            {
+                return Icon.ExtractAssociatedIcon(Application.ExecutablePath)
+                    ?? (Icon)SystemIcons.Application.Clone();
+            }
+            catch
+            {
+                return (Icon)SystemIcons.Application.Clone();
             }
         }
 
@@ -192,6 +204,7 @@ namespace WindowsNoSleep
 
             _notifyIcon.Visible = false;
             _notifyIcon.Dispose();
+            _applicationIcon.Dispose();
         }
     }
 }

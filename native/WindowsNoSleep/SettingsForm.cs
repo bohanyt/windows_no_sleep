@@ -20,6 +20,7 @@ namespace WindowsNoSleep
             MinimumSize = new Size(460, 260);
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
+            Icon = LoadApplicationIcon();
 
             var title = new Label
             {
@@ -94,6 +95,18 @@ namespace WindowsNoSleep
             };
 
             RefreshState();
+        }
+
+        private static Icon LoadApplicationIcon()
+        {
+            try
+            {
+                return Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         internal void RefreshState()
