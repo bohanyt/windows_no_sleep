@@ -133,3 +133,18 @@ The test keeps normal endpoint security enabled, requires the exact EXE SHA-256 
 
 Any warning/block/quarantine immediately stops the trial; do not rerun or whitelist.
 
+
+
+### Successor Control Tower handoff — 2026-09-21
+
+Durable full successor handoff:
+
+`docs/CONTROL_TOWER_HANDOFF_20260921.md`
+
+Read it through this exact sentinel before claiming full handoff consumption:
+
+`END_OF_CONTROL_TOWER_HANDOFF key=WNS-CT-20260921-NATIVE-PILOT-PENDING-V1 sections=18`
+
+Current handoff posture: **native pilot physical protected-endpoint test is still PENDING, not PASS/FAIL.**
+
+The owner had only begun local artifact/path preparation and had not yet returned a matching EXE hash or runtime/EDR result. Continue `docs/LOCAL_NATIVE_PILOT_DISPATCH_001.md`; do not restart architecture work or revive the PowerShell lane.
