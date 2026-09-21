@@ -47,6 +47,7 @@
 
   <ItemGroup>
     <Compile Include="Program.cs" />
+    <Compile Include="AlreadyRunningForm.cs" />
     <Compile Include="NativeMethods.cs" />
     <Compile Include="PowerRequestLease.cs" />
     <Compile Include="TrayApplicationContext.cs" />
