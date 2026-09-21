@@ -1,6 +1,5 @@
 using System;
 using System.Drawing;
-using System.Threading;
 using System.Windows.Forms;
 
 namespace WindowsNoSleep
@@ -10,16 +9,13 @@ namespace WindowsNoSleep
         private readonly NotifyIcon _notifyIcon;
         private readonly Icon _applicationIcon;
         private readonly ToolStripMenuItem _toggleItem;
-        private readonly EventWaitHandle _showSettingsEvent;
-        private readonly System.Windows.Forms.Timer _activationTimer;
         private SettingsForm _settingsForm;
         private PowerRequestLease _powerRequest;
         private bool _disposed;
         private string _lastError;
 
-        internal TrayApplicationContext(EventWaitHandle showSettingsEvent)
+        internal TrayApplicationContext()
         {
-            _showSettingsEvent = showSettingsEvent ?? throw new ArgumentNullException(nameof(showSettingsEvent));
             _applicationIcon = LoadApplicationIcon();
 
             var menu = new ContextMenuStrip();
@@ -40,22 +36,6 @@ namespace WindowsNoSleep
                 Visible = true
             };
             _notifyIcon.MouseClick += OnNotifyIconMouseClick;
-
-            // A second launch signals the named event and exits. Polling it on
-            // the WinForms UI thread lets that launch focus this one without
-            // ever creating a second tray icon or power-request owner.
-            _activationTimer = new System.Windows.Forms.Timer
-            {
-                Interval = 100
-            };
-            _activationTimer.Tick += delegate
-            {
-                if (_showSettingsEvent.WaitOne(0))
-                {
-                    ShowSettings();
-                }
-            };
-            _activationTimer.Start();
 
             StartProtection();
         }
@@ -212,8 +192,6 @@ namespace WindowsNoSleep
             }
 
             _disposed = true;
-            _activationTimer.Stop();
-            _activationTimer.Dispose();
 
             if (_powerRequest != null)
             {
