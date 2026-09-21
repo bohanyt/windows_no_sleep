@@ -13,8 +13,8 @@
     <Deterministic>true</Deterministic>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>Assets\WindowsNoSleep.ico</ApplicationIcon>
+    <LangVersion>7.3</LangVersion>
   </PropertyGroup>
-
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <PlatformTarget>x64</PlatformTarget>
     <DebugSymbols>true</DebugSymbols>
@@ -22,45 +22,46 @@
     <Optimize>false</Optimize>
     <OutputPath>bin\Debug\</OutputPath>
     <DefineConstants>DEBUG;TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
-
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
     <PlatformTarget>x64</PlatformTarget>
     <DebugType>pdbonly</DebugType>
     <Optimize>true</Optimize>
     <OutputPath>bin\Release\</OutputPath>
     <DefineConstants>TRACE</DefineConstants>
-    <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
     <Prefer32Bit>false</Prefer32Bit>
   </PropertyGroup>
-
   <ItemGroup>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
-
   <ItemGroup>
     <Compile Include="Program.cs" />
     <Compile Include="AlreadyRunningForm.cs" />
     <Compile Include="NativeMethods.cs" />
     <Compile Include="PowerRequestLease.cs" />
+    <Compile Include="ProtectionModels.cs" />
+    <Compile Include="WindowsPowerPlatform.cs" />
+    <Compile Include="PolicyTransaction.cs" />
+    <Compile Include="RuntimeStorage.cs" />
+    <Compile Include="ProtectionController.cs" />
+    <Compile Include="WindowsLifecycle.cs" />
     <Compile Include="TrayApplicationContext.cs" />
     <Compile Include="SettingsForm.cs" />
+    <Compile Include="SelfTests.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
-
   <ItemGroup>
     <None Include="App.config" />
     <Content Include="Assets\WindowsNoSleep.ico" />
     <None Include="Assets\WindowsNoSleep.svg" />
     <None Include="app.manifest" />
   </ItemGroup>
-
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

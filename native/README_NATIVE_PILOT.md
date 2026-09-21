@@ -1,46 +1,35 @@
-# Windows No Sleep — native pilot
+# Windows No Sleep 0.4 — native V1 development build
 
-This branch is the minimal compiled pilot created after Issue #3 exposed endpoint-security compatibility problems with the PowerShell-first runtime.
+Keeps computer workloads running while allowing the display to turn off. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. This is a bundled development candidate, not a claim of final physical-laptop/EDR/overnight acceptance.
 
-## What this pilot does
+## Use the existing updater
 
-- builds `WindowsNoSleep.exe` as a conventional C# WinForms application targeting .NET Framework 4.8;
-- starts `PowerRequestSystemRequired` immediately;
-- exposes a tray icon and small Settings/status window;
-- supports Start/Stop Protection and Exit;
-- releases its owned power-request handle on Stop/Exit;
-- runs non-elevated.
+Exit Windows No Sleep through its tray menu, then double-click `Update Windows No Sleep.cmd` in your existing repository folder. It downloads the CI-built executable, rather than compiling on your laptop. The executable stays at `artifacts\local-current\WindowsNoSleep.exe`. No new clone, folder reorganization or manual ZIP extraction is required.
 
-## What this pilot deliberately does NOT do
+A first launch starts protection in the tray. Click the tray icon for Settings. An accidental second launch shows the existing 5-second notice without another protection owner. Close hides Settings; tray **Exit** quits and attempts verified restoration.
 
-- no PowerShell/CMD/script-host child process;
-- no lid-action mutation;
-- no AC/DC sleep-timeout mutation;
-- no registry startup entry;
-- no RunOnce recovery;
-- no recovery journal yet;
-- no shutdown/restart blocker yet;
-- no battery-safety controller yet;
-- no installer;
-- no code signing yet;
-- no AV/EDR exclusion or bypass.
+## Included features
 
-The purpose of this pilot is to validate the boring compiled packaging/runtime direction on a protected endpoint **before** porting the rest of V1.
+- Direct SystemRequired awake request. Display-on forcing is not enabled.
+- Normal shutdown/restart guard with a visible Windows block reason. Forced/critical shutdown and logoff are not vetoed. This does not disable or guarantee prevention of every Windows Update restart.
+- Battery Safety: 15% base threshold, or higher when a readable Windows critical threshold plus five requires it. Unknown/critical DC battery status releases protection. A five-point hysteresis prevents rapid resume/pause cycling; AC permits resumption unless an unresolved recovery error exists.
+- Temporary lid AC/DC Do Nothing where the device has a lid and Windows permissions allow it.
+- Temporary DC SleepIdle Never, and HibernateIdle Never when hibernation is present. No AC sleep/display values, power-button actions, critical-battery actions, update services, or global hibernation feature settings are changed.
+- Versioned, atomically written recovery journal before each attempted power-setting write. Stop/Exit restores recorded originals and reads them back before clearing the journal.
+- ARR crash/hang recovery registration plus restore-before-protect on every normal launch. ARR is best effort. After power loss, hard termination or EDR termination, exact recorded settings can be restored only when the application runs again. Pending/corrupt/foreign/conflicting journals are preserved, not guessed or erased.
+- Optional **Start with Windows (after I sign in)**. Default OFF. The checkbox owns only the `WindowsNoSleep.Native` value under the current user's Run key and directly launches this EXE. No service, task, RunOnce or script recovery process.
+- Local diagnostics, state-specific tray badges, bounded event logging and a restoration receipt.
 
-## Build
+## Safety and data
 
-```powershell
-msbuild .\native\WindowsNoSleep\WindowsNoSleep.csproj /p:Configuration=Release /p:Platform=x64
-```
+Runtime data is under `%LOCALAPPDATA%\WindowsNoSleep`: `settings.json`, pending `recovery.json`, `last-restore.json`, `events.log` and an ownership lock. The updater does not delete this data.
 
-Expected output:
+Do not delete a pending recovery journal or change the power plan while validating apply/restore. External setting conflicts cause a safety stop and a retained journal; the app will not overwrite another actor's setting silently. If policy/permissions/ARR ownership prevent safe changes, Settings reports partial/degraded capability while retaining basic awake protection where safe.
 
-```text
-native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe
-```
+Windows security remains enabled. Stop on a security detection; no exclusion, quarantine release, forced rerun or elevation workaround. Physical closed-lid use must maintain cooling and normal critical-battery/thermal protection.
 
-## CI self-test
+## Development evidence
 
-The CI self-test launches the exact compiled EXE with `--self-test`. It acquires and releases only a `PowerRequestSystemRequired` lease. It does not write power policy, startup registry state, or recovery persistence.
+CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`.
 
-Physical protected-endpoint execution requires a separate Control Tower dispatch after hosted build/self-test evidence is green.
+`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. Automatic tests do not establish physical lid/DC/overnight behavior, login-startup behavior or universal EDR acceptance. The consolidated final operator campaign is documented in `docs/NATIVE_V1_ACCEPTANCE.md` in the repository.

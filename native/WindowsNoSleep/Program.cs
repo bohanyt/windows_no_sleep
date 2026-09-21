@@ -1,82 +1,76 @@
 using System;
+using System.IO;
 using System.Linq;
-using System.Threading;
 using System.Windows.Forms;
 
 namespace WindowsNoSleep
 {
     internal static class Program
     {
-        private const string SingleInstanceMutexName =
-            @"Local\WindowsNoSleep-6B4E7D6F-6E39-4C33-9F75-6AF730C57D61";
-        private const string DuplicateNoticeMutexName =
-            @"Local\WindowsNoSleep-6B4E7D6F-6E39-4C33-9F75-6AF730C57D61-DuplicateNotice";
-
+        private const string InstanceName = @"Local\WindowsNoSleep-6B4E7D6F-6E39-4C33-9F75-6AF730C57D61";
+        private const string NoticeName = InstanceName + "-DuplicateNotice";
         [STAThread]
         private static int Main(string[] args)
         {
-            if (args.Any(arg => string.Equals(arg, "--self-test", StringComparison.OrdinalIgnoreCase)))
+            // These test paths exit before settings, startup entries, policy writes,
+            // normal tray initialization or production recovery are ever touched.
+            if (args.Length == 1 && args[0] == "--self-test") return RunSelfTest();
+            if (args.Length == 2 && args[0] == "--test-suite") return SelfTests.Run(args[1]);
+            if (args.Any(arg => arg != "--autostart" && arg != "--recovered")) return 64;
+            bool quietDuplicate = args.Length != 0;
+            Application.EnableVisualStyles();
+            Application.SetCompatibleTextRenderingDefault(false);
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
+            try
             {
-                return RunSelfTest();
+                using (var owner = new NamedOwnership(InstanceName))
+                {
+                    if (!owner.Acquired) return quietDuplicate ? 0 : ShowAlreadyRunning();
+                    string directory = RuntimeStorage.DefaultPath;
+                    Directory.CreateDirectory(directory);
+                    // Also serialize same-account instances in different Windows sessions.
+                    FileStream fileOwner;
+                    try { fileOwner = new FileStream(Path.Combine(directory, "owner.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+                    catch (IOException error)
+                    {
+                        if ((error.HResult & 0xffff) == 32) return quietDuplicate ? 0 : ShowAlreadyRunning();
+                        throw;
+                    }
+                    using (fileOwner)
+                    using (var context = new TrayApplicationContext(directory))
+                    {
+                        UnhandledExceptionEventHandler recover = delegate { context.RecoverForCrash(null); };
+                        AppDomain.CurrentDomain.UnhandledException += recover;
+                        try { context.Initialize(); Application.Run(context); }
+                        finally { AppDomain.CurrentDomain.UnhandledException -= recover; }
+                    }
+                }
+                return 0;
             }
-
-            bool createdNew;
-            using (var singleInstanceMutex = new Mutex(true, SingleInstanceMutexName, out createdNew))
+            catch (Exception error)
             {
-                if (!createdNew)
-                {
-                    return ShowAlreadyRunningNotice();
-                }
-
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-
-                using (var context = new TrayApplicationContext())
-                {
-                    Application.Run(context);
-                }
+                MessageBox.Show("Windows No Sleep could not start safely. Any pending recovery record has been preserved.\n\n" + error.Message,
+                    "Windows No Sleep", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return 1;
             }
-
-            return 0;
         }
-
-        private static int ShowAlreadyRunningNotice()
+        private static int ShowAlreadyRunning()
         {
-            bool noticeCreated;
-            using (var noticeMutex = new Mutex(true, DuplicateNoticeMutexName, out noticeCreated))
+            using (var notice = new NamedOwnership(NoticeName))
             {
-                if (!noticeCreated)
-                {
-                    return 0;
-                }
-
-                Application.EnableVisualStyles();
-                Application.SetCompatibleTextRenderingDefault(false);
-                Application.Run(new AlreadyRunningForm());
+                if (!notice.Acquired) return 0;
+                using (var form = new AlreadyRunningForm()) Application.Run(form);
             }
-
             return 0;
         }
-
         private static int RunSelfTest()
         {
             try
             {
-                using (var lease = PowerRequestLease.AcquireSystemRequired(
-                    "Windows No Sleep self-test"))
-                {
-                    if (!lease.IsActive)
-                    {
-                        return 2;
-                    }
-                }
-
-                return 0;
+                using (var lease = PowerRequestLease.AcquireSystemRequired("Windows No Sleep hosted non-mutating self-test"))
+                    return lease.IsActive ? 0 : 2;
             }
-            catch
-            {
-                return 1;
-            }
+            catch { return 1; }
         }
     }
 }

@@ -1,108 +1,45 @@
 # PROGRESS
 
-## Current status — 2026-09-17
+## Current native implementation — 2026-09-21
 
-Phase: **P2 — physical Windows integration / EDR compatibility blocker**.
+Active lane: `feat/v1-native-winforms`, SAME DRAFT PR #4. Version 0.4.0.0 is the bundled native V1 development candidate. No merge/release-candidate acceptance is implied.
 
-GitHub is the source of truth. DRAFT PR #2 remains the implementation lane on `feat/v1-portable-tray` at head `8059f92f51702c35646e94c8b1afe1e1e3c96934` unless GitHub moves it.
+Owner explicitly requested all seven remaining features in one update, with manual testing consolidated at the end. Durable instruction: Issue #1 comment **5754988623**. The existing updater path remains `artifacts\local-current\WindowsNoSleep.exe`; no new clone or directory reorganization.
 
-### New blocking evidence — Issue #3
+### Implemented together
 
-Issue #3 (`EDR quarantines PowerShell launcher/recovery path during Windows integration test`) was opened on 2026-09-17 from a protected Windows endpoint.
+- Direct SystemRequired request, with display-off still allowed.
+- Native shutdown reason window and session-end handling; normal requests may be blocked, critical/forced shutdown and logoff are allowed.
+- Battery monitor and safety controller: 15% base or higher readable Windows critical threshold +5, critical/unknown DC safety pause, hysteresis and safe AC resume.
+- Four-key native policy allowlist: LidAction AC/DC, SleepIdle DC, HibernateIdle DC. Hibernate timeout is included only when hibernation is present. No unrelated setting writes.
+- Durable versioned recovery storage; attempted-before-write ordering; rollback after partial failures; exact read-back restore before clearing pending recovery; next-launch recovery before new policy writes; external conflicts and invalid journals preserved.
+- ARR callback/restart registration, bounded crash-recovery lock attempt and Windows cancellation pings. Force-kill/power-loss recovery remains next-launch, not an instantaneous guarantee.
+- Opt-in Start with Windows checkbox (default OFF), owning one quoted direct-EXE HKCU Run value.
+- Settings/status for all capabilities, distinct tray state badges, diagnostics, bounded local logs and a last-restore receipt.
+- Single-instance mutex acquisition corrected to use actual ownership, with the existing five-second duplicate notice retained.
 
-Observed report:
+### Automated validation
 
-- running `powershell.exe -NoProfile -File .\tests\WindowsIntegrationTests.ps1` against the current implementation family triggered endpoint-security/EDR quarantine;
-- quarantined/removed items included the main `WindowsNoSleep.ps1`, launcher, modules, tests and local-verification scripts;
-- the security UI also quarantined the per-user `WindowsNoSleepRecovery` RunOnce registry value associated with `powershell.exe (Interactive Session)`;
-- no AV/EDR bypass, exclusion or allowlist was used;
-- no deletion was committed; the contributor restored the local worktree with `git restore .`.
+`SelfTests.cs` covers fake-provider battery thresholds, controller lifecycle, policy write-ahead ordering, crash boundaries, rollback failures, conflict preservation, corrupt/foreign journals, settings, mutex ownership and startup command quoting. It does not create production startup entries or mutate live power settings. `native/tests/AbiCheck.cpp` validates capability offsets against the Windows SDK.
 
-The issue explicitly notes that the combination of PowerShell execution, hidden recovery invocation, and RunOnce persistence may be contributing to the heuristic, but this is an observation rather than a proven root cause.
+The Actions workflow builds Release x64, runs those tests plus a real non-mutating PowerRequest self-test, records SHA-256/build ID and publishes the compatible five `dev-latest` assets only after success. Consult the exact-head Actions run and Issue #1 completion comment for actual outcomes; this source commit does not predeclare CI green.
 
-Evidence label: **`EDR_COMPATIBILITY_FAILED_ON_REPORTED_ENDPOINT`**.
+### Evidence already reported by the owner
 
-### Control Tower decision
+In the current conversation, screenshots show the native application/branding and countdown duplicate notice. The owner explicitly reports Start -> Protected -> Exit with window/tray/process cleanup working for the earlier native UI build. The updater was pulled locally and the resulting app opened.
 
-**Dispatch 004 is now HOLD, not executable, until Issue #3 is triaged.**
+Those reports do not prove the new policy/ARR/battery/lid/restart/autostart paths. No unseen hash, endpoint-security product detail, closed-lid, DC, overnight or forced-crash result is invented.
 
-Reason: Dispatch 004 exercises the production PowerShell + recovery persistence path on a protected endpoint. Re-running it before redesign/triage could simply reproduce the quarantine and is unnecessary.
+### Next operator action
 
-Do not:
+Once the complete candidate's exact-head CI/release is verified, Exit the old app and double-click the SAME `Update Windows No Sleep.cmd`. Open Settings from the tray. One consolidated final acceptance campaign is in `docs/NATIVE_V1_ACCEPTANCE.md`; no per-feature ZIP loop.
 
-- disable or bypass EDR/Defender/SentinelOne;
-- add unsafe exclusions merely to make the test pass;
-- rerun the quarantined path on the affected endpoint;
-- claim release-package/EDR compatibility.
+Final native physical labels (`LID_VERIFIED`, `BATTERY_VERIFIED`, `HEADLESS_VERIFIED`, final `EDR_VERIFIED`) remain PENDING. Forced Windows actions, thermal protection and power loss are not defeated. A restore failure requires recovery attention, not more mutation tests.
 
-Next engineering step is to redesign or repackage the recovery/runtime path so the exact-restore safety contract remains intact. Candidate directions must be evaluated against Issue #3 and the original owner preference for portable/simple deployment; do not weaken recovery safety just to reduce detections.
+## Historical reference — superseded paths
 
-### Issue #3 remediation proposal — owner approval pending
-
-Durable proposal: `docs/ISSUE_003_EDR_PLAN.md` on `main`.
-
-Status: **PROPOSED, not implementation or local-execution authority**.
-
-Recommended direction:
-
-- conventional portable C# WinForms / .NET Framework 4.8 executable, with no PowerShell runtime wrapper;
-- a small non-mutating compiled pilot before porting all features;
-- trusted release signing/provenance as a target, not a claim of an available certificate or guaranteed antivirus acceptance;
-- preserve exact recovery and validate one transparent, documented direct-EXE recovery mechanism before enabling real lid/DC mutations;
-- do not treat removal of RunOnce, a different extension or a new startup mechanism as a proven fix;
-- preserve final V1 goals; the non-mutating pilot is not approval to silently drop lid/DC requirements;
-- one implementation lane; no swarm.
-
-Additional source-level safety finding at `8059f92f51702c35646e94c8b1afe1e1e3c96934`:
-
-- `tests/WindowsIntegrationTests.ps1` launches the real app with default settings, force-kills it, and unconditionally deletes its temporary runtime directory;
-- it does not prevent laptop policy writes before launch or verify policy restoration before deleting possible recovery data;
-- hosted no-battery CI success therefore does not establish that this test is non-mutating on a laptop;
-- this is a reviewed upstream safety risk, not a claim that the reporter's machine definitely retained changed settings.
-
-Next bounded actions after owner review:
-
-1. obtain existing EDR alert details, exact tested contributor SHA and approved read-only current Windows/recovery state; do not reproduce the quarantine;
-2. harden test isolation and recovery-data preservation before new real-policy testing;
-3. if approved, build the small compiled pilot and validate its exact artifact before the rest of the port;
-4. independently review recovery/sign-in semantics and reauthorize physical tests only through a new exact-SHA dispatch.
-
-No implementation source was changed for this proposal. Local Cursor remains **HOLD / no new dispatch**. No certificate purchase, security exclusion, endpoint script execution or new policy mutation is authorized by the proposal.
-
-### Previously verified physical evidence
-
-- `LOCAL_READ_ONLY_VERIFIED` — physical Windows 11 25H2 / Modern Standby S0 baseline read successfully.
-- `LOCAL_POLICY_TRANSACTION_VERIFIED` — real `SleepIdle DC 1200 -> 0 -> 1200` exact restore passed.
-- `LID_CLOSED_AC_EXTERNAL_DISPLAY_VERIFIED` — lid closed on AC for ~90s with external monitor connected; workload heartbeat continued with max gap ~1.046s.
-
-These passes remain evidence for their original tested builds, not automatic verification of a future compiled port.
-
-### Still open
-
-- Issue #3 EDR compatibility/root-cause redesign;
-- affected-endpoint policy/recovery reconciliation if necessary;
-- hosted-test mutation/cleanup hazard;
-- owner approval of the proposed compiled packaging;
-- production crash-recovery lifecycle after redesign;
-- clean Stop/Exit exact restore witness;
-- `BATTERY_VERIFIED`;
-- `HEADLESS_VERIFIED`;
-- longer Modern Standby/overnight soak;
-- final protected-endpoint package acceptance;
-- independent release review before PR #2 is ready/merged.
-
----
-
-## Historical status — 2026-09-14
-
-Phase: **P2 — physical Windows integration / production recovery gate**.
-
-The 2026-09-14 state below is historical and superseded by the 2026-09-17 EDR blocker above.
-
-- Frozen implementation/test head for the next local gate was `8059f92f51702c35646e94c8b1afe1e1e3c96934`.
-- Production tray runtime had transactional temporary LidAction/DC SleepIdle protection, exact restore, startup recovery, active-plan drift handling, and `-RecoveryOnly`.
-- Hosted Windows PowerShell 5.1 CI was green for static/core, read-only power-policy, transaction/recovery, runtime-policy lifecycle, and hosted tray E2E.
-- Dispatch 001 PASS: read-only physical baseline.
-- Dispatch 002 PASS: direct real apply/restore smoke.
-- Dispatch 003 PASS: AC closed-lid workload witness with external display connected.
-- Dispatch 004 was prepared but is now HOLD due to Issue #3.
+- Old PowerShell PR #2 is CLOSED/superseded. Old Dispatch 004 remains HOLD/cancelled and must not be run.
+- Issue #3 recorded security quarantine involving the earlier PowerShell runtime/recovery path; the exact triggering heuristic was not established. No exclusion, policy bypass or renamed/packed workaround is authorized.
+- Earlier PowerShell physical evidence (read-only baseline, DC SleepIdle 1200 -> 0 -> 1200, AC lid closed with an external monitor) informs the native port but does not certify it.
+- The original 18-section native-pilot handoff on main described the earlier pending pilot. Its pilot-only sequencing is superseded for this source implementation by the current explicit owner bundle request, not by an invented PASS.
+- GitHub remains source of truth. Issue #3 stays open until current native endpoint/recovery acceptance is actually evidenced.
