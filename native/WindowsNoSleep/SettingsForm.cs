@@ -14,10 +14,10 @@ namespace WindowsNoSleep
         {
             _context = context ?? throw new ArgumentNullException(nameof(context));
 
-            Text = "Windows No Sleep — native pilot";
+            Text = "Windows No Sleep";
             Width = 460;
-            Height = 260;
-            MinimumSize = new Size(460, 260);
+            Height = 240;
+            MinimumSize = new Size(460, 240);
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             Icon = LoadApplicationIcon();
@@ -45,14 +45,14 @@ namespace WindowsNoSleep
                 Left = 20,
                 Top = 108,
                 Width = 400,
-                Height = 42,
-                Text = "Native pilot: no lid/DC power-policy writes, no startup registry entry, no recovery persistence."
+                Height = 24,
+                Text = "Your display may still turn off normally."
             };
 
             _toggleButton = new Button
             {
                 Left = 20,
-                Top = 165,
+                Top = 150,
                 Width = 145,
                 Height = 30
             };
@@ -66,13 +66,14 @@ namespace WindowsNoSleep
                 {
                     _context.StartProtection();
                 }
+
                 RefreshState();
             };
 
             var closeButton = new Button
             {
                 Left = 175,
-                Top = 165,
+                Top = 150,
                 Width = 110,
                 Height = 30,
                 Text = "Close"

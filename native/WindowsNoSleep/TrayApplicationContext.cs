@@ -1,5 +1,6 @@
 using System;
 using System.Drawing;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace WindowsNoSleep
@@ -9,14 +10,18 @@ namespace WindowsNoSleep
         private readonly NotifyIcon _notifyIcon;
         private readonly Icon _applicationIcon;
         private readonly ToolStripMenuItem _toggleItem;
+        private readonly EventWaitHandle _showSettingsEvent;
+        private readonly System.Windows.Forms.Timer _activationTimer;
         private SettingsForm _settingsForm;
         private PowerRequestLease _powerRequest;
         private bool _disposed;
         private string _lastError;
 
-        internal TrayApplicationContext()
+        internal TrayApplicationContext(EventWaitHandle showSettingsEvent)
         {
+            _showSettingsEvent = showSettingsEvent ?? throw new ArgumentNullException(nameof(showSettingsEvent));
             _applicationIcon = LoadApplicationIcon();
+
             var menu = new ContextMenuStrip();
             var openItem = new ToolStripMenuItem("Open Settings", null, delegate { ShowSettings(); });
             _toggleItem = new ToolStripMenuItem("Stop Protection", null, delegate { ToggleProtection(); });
@@ -36,6 +41,22 @@ namespace WindowsNoSleep
             };
             _notifyIcon.MouseClick += OnNotifyIconMouseClick;
 
+            // A second launch signals the named event and exits. Polling it on
+            // the WinForms UI thread lets that launch focus this one without
+            // ever creating a second tray icon or power-request owner.
+            _activationTimer = new System.Windows.Forms.Timer
+            {
+                Interval = 100
+            };
+            _activationTimer.Tick += delegate
+            {
+                if (_showSettingsEvent.WaitOne(0))
+                {
+                    ShowSettings();
+                }
+            };
+            _activationTimer.Start();
+
             StartProtection();
         }
 
@@ -50,15 +71,15 @@ namespace WindowsNoSleep
             {
                 if (IsProtected)
                 {
-                    return "Protected — SystemRequired power request is active.";
+                    return "Protection active — this computer will stay awake while Windows No Sleep is running.";
                 }
 
                 if (!string.IsNullOrWhiteSpace(_lastError))
                 {
-                    return "Degraded — " + _lastError;
+                    return "Protection degraded — " + _lastError;
                 }
 
-                return "Stopped — no power request is active.";
+                return "Protection stopped — Windows may sleep normally.";
             }
         }
 
@@ -111,6 +132,7 @@ namespace WindowsNoSleep
             _settingsForm.Show();
             _settingsForm.WindowState = FormWindowState.Normal;
             _settingsForm.Activate();
+            _settingsForm.BringToFront();
         }
 
         private void ToggleProtection()
@@ -190,6 +212,8 @@ namespace WindowsNoSleep
             }
 
             _disposed = true;
+            _activationTimer.Stop();
+            _activationTimer.Dispose();
 
             if (_powerRequest != null)
             {
