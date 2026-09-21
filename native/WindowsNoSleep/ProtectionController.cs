@@ -12,9 +12,12 @@ namespace WindowsNoSleep
         private readonly IShutdownGuard _guard;
         private readonly Func<IDisposable> _acquireAwake;
         private readonly Action<string> _log;
+        private readonly IScreenSaverProtection _screenSaver;
         private IDisposable _awake;
         private bool _wanted, _batteryPaused, _suspended, _faulted;
         private volatile bool _terminal;
+        private ProtectionState _steadyState;
+        private string _steadyDetail;
         internal bool PolicyRecoveryReady;
         internal string PolicyRecoveryError;
         internal AppOptions Options { get; private set; }
@@ -22,19 +25,21 @@ namespace WindowsNoSleep
         internal ProtectionState State { get; private set; }
         internal string Detail { get; private set; }
         internal string PolicyDetail { get; private set; }
+        internal string ScreenSaverDetail { get { return _screenSaver == null ? "Not available" : _screenSaver.Detail; } }
+        internal string ScreenSaverWarning { get { return _screenSaver == null ? null : _screenSaver.Warning; } }
         internal int EffectiveThreshold { get; private set; }
         internal bool IsAwake { get { return _awake != null; } }
         internal bool Wanted { get { return _wanted; } }
         internal bool GuardActive { get { return _guard.IsArmed; } }
         internal bool RecoveryPending
         {
-            get { try { return _transaction.Pending; } catch { return true; } }
+            get { try { return _transaction.Pending || (_screenSaver != null && _screenSaver.Pending); } catch { return true; } }
         }
         internal ProtectionController(AppOptions options, IPowerSensor sensor, PolicyTransaction transaction,
-            IShutdownGuard guard, Func<IDisposable> acquireAwake, Action<string> log)
+            IShutdownGuard guard, Func<IDisposable> acquireAwake, Action<string> log, IScreenSaverProtection screenSaver = null)
         {
             options.Validate(); Options = options.Copy(); _sensor = sensor; _transaction = transaction;
-            _guard = guard; _acquireAwake = acquireAwake; _log = log;
+            _guard = guard; _acquireAwake = acquireAwake; _log = log; _screenSaver = screenSaver;
             State = ProtectionState.Starting; Detail = "Starting protection..."; PolicyDetail = "Not applied";
             EffectiveThreshold = options.BatterySafetyPercent;
         }
@@ -45,12 +50,7 @@ namespace WindowsNoSleep
                 if (_terminal) return;
                 if (_wanted && _awake != null) return;
                 _wanted = true; _faulted = false;
-                try
-                {
-                    if (_transaction.Pending && !PolicyRecoveryReady)
-                        throw new InvalidOperationException("Pending recovery cannot run: " + PolicyRecoveryError);
-                    _transaction.Restore();
-                }
+                try { RestoreSettings(null); }
                 catch (Exception error)
                 {
                     _faulted = true;
@@ -74,14 +74,14 @@ namespace WindowsNoSleep
             bool batteryDisabled = Power.HasBattery && Power.OnAc != true && !Options.ProtectOnBattery;
             if (unsafeBattery || batteryDisabled)
             {
-                if (_awake != null || _guard.IsArmed || _transaction.Active)
+                if (_awake != null || _guard.IsArmed || _transaction.Active || (_screenSaver != null && _screenSaver.Active))
                 {
                     string cleanup = ReleaseOwned();
                     if (cleanup != null) { _faulted = true; PolicyDetail = "Restore pending: " + cleanup; }
                 }
                 _batteryPaused = unsafeBattery;
                 SetState(unsafeBattery ? ProtectionState.BatterySafety : ProtectionState.Stopped,
-                    unsafeBattery ? "Battery Safety - sleep and shutdown are allowed. Protection resumes when power is safe."
+                    unsafeBattery ? "Battery Safety - screensaver, sleep and shutdown are allowed. Protection resumes when power is safe."
                     : "Paused on battery - protection resumes when plugged in.");
                 return;
             }
@@ -96,6 +96,8 @@ namespace WindowsNoSleep
                 try
                 {
                     if (_transaction.HasDrift()) throw new InvalidOperationException("Windows power settings changed outside this app.");
+                    if (_screenSaver != null) _screenSaver.Poll();
+                    ApplyDesktopStatus();
                 }
                 catch (Exception error)
                 {
@@ -114,6 +116,7 @@ namespace WindowsNoSleep
             {
                 _awake = _acquireAwake();
                 if (_awake == null) throw new InvalidOperationException("Windows did not create an awake request.");
+                if (_screenSaver != null) _screenSaver.Start(Options.PreventScreenSaver != false);
                 try { _guard.Set(Options.BlockShutdown); }
                 catch (Exception error) { warnings.Add("Restart guard unavailable: " + error.Message); }
                 var keys = PolicyKeys.Requested(Options, Power);
@@ -143,9 +146,10 @@ namespace WindowsNoSleep
                         }
                     }
                 }
-                SetState(warnings.Count == 0 ? ProtectionState.Protected : ProtectionState.Degraded,
-                    warnings.Count == 0 ? "Protection active - preventing inactivity sleep. Your display may turn off."
-                    : "Basic awake request active. " + string.Join(" ", warnings));
+                _steadyState = warnings.Count == 0 ? ProtectionState.Protected : ProtectionState.Degraded;
+                _steadyDetail = warnings.Count == 0 ? "Awake protection active. See screensaver / idle-lock status below."
+                    : "Basic awake request active. " + string.Join(" ", warnings);
+                ApplyDesktopStatus();
             }
             catch (Exception error)
             {
@@ -154,21 +158,37 @@ namespace WindowsNoSleep
                 SetState(ProtectionState.Degraded, "Protection could not start safely. " + error.Message + " " + cleanup);
             }
         }
+        private void ApplyDesktopStatus()
+        {
+            string warning = Options.PreventScreenSaver == false ? null : ScreenSaverWarning;
+            SetState(warning == null ? _steadyState : ProtectionState.Degraded,
+                _steadyDetail + (warning == null ? "" : " Screensaver / idle lock: " + warning));
+        }
+        private void RestoreSettings(Action pulse)
+        {
+            var errors = new List<string>();
+            // Each recovery domain must be attempted even if the other one fails.
+            try { if (_screenSaver != null) _screenSaver.Restore(); }
+            catch (Exception error) { errors.Add("Screensaver: " + error.Message); }
+            try
+            {
+                if (_transaction.Pending && !PolicyRecoveryReady)
+                    throw new InvalidOperationException("Pending power recovery cannot run: " + PolicyRecoveryError);
+                _transaction.Restore(pulse);
+                PolicyDetail = "Original settings restored and verified (or no changes needed)";
+            }
+            catch (Exception error) { errors.Add(error.Message); PolicyDetail = "Restore pending: " + error.Message; }
+            if (errors.Count != 0) throw new InvalidOperationException(string.Join("; ", errors));
+        }
         private string ReleaseOwned()
         {
             var errors = new List<string>();
-            // Release transient blockers first even if persistent restoration fails.
             try { _guard.Set(false); } catch (Exception error) { errors.Add(error.Message); }
             try { if (_awake != null) _awake.Dispose(); }
             catch (Exception error) { errors.Add(error.Message); }
             finally { _awake = null; }
-            try
-            {
-                if (_transaction.Pending && !PolicyRecoveryReady) throw new InvalidOperationException(PolicyRecoveryError);
-                _transaction.Restore();
-                PolicyDetail = "Original settings restored and verified (or no changes needed)";
-            }
-            catch (Exception error) { errors.Add(error.Message); PolicyDetail = "Restore pending: " + error.Message; }
+            try { RestoreSettings(null); }
+            catch (Exception error) { errors.Add(error.Message); }
             return errors.Count == 0 ? null : string.Join("; ", errors);
         }
         internal void Stop()
@@ -179,7 +199,7 @@ namespace WindowsNoSleep
                 string error = ReleaseOwned();
                 _faulted = error != null;
                 SetState(error == null ? ProtectionState.Stopped : ProtectionState.Degraded,
-                    error == null ? "Protection stopped - Windows may sleep normally." : "Protection stopped; restore needs attention. " + error);
+                    error == null ? "Protection stopped - Windows screensaver and sleep settings restored." : "Protection stopped; restore needs attention. " + error);
             }
         }
         internal void ChangeOptions(AppOptions options, Action<AppOptions> persist)
@@ -209,7 +229,7 @@ namespace WindowsNoSleep
             lock (_sync)
             {
                 _suspended = false;
-                if (_awake != null || _transaction.Active)
+                if (_awake != null || _transaction.Active || (_screenSaver != null && _screenSaver.Active))
                 {
                     string error = ReleaseOwned();
                     if (error != null) _faulted = true;
@@ -235,12 +255,12 @@ namespace WindowsNoSleep
             if (!Monitor.TryEnter(_sync, 100)) return false;
             try
             {
-                if (_awake != null) { _awake.Dispose(); _awake = null; }
-                if (_transaction.Pending && !PolicyRecoveryReady) return false;
-                _transaction.Restore(pulse);
-                return true;
+                bool success = true;
+                try { if (_awake != null) _awake.Dispose(); } catch { success = false; }
+                finally { _awake = null; }
+                try { RestoreSettings(pulse); } catch { success = false; }
+                return success;
             }
-            catch { return false; }
             finally { Monitor.Exit(_sync); }
         }
         private void SetState(ProtectionState state, string detail)

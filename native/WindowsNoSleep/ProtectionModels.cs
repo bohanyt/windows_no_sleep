@@ -13,6 +13,8 @@ namespace WindowsNoSleep
         [DataMember(IsRequired = true)] public bool DcTimeoutProtection = true;
         [DataMember(IsRequired = true)] public bool BlockShutdown = true;
         [DataMember(IsRequired = true)] public int BatterySafetyPercent = 15;
+        // Missing in 0.4 settings => enabled. Explicit false remains false on update.
+        [DataMember(IsRequired = false)] public bool? PreventScreenSaver = true;
         internal void Validate()
         {
             if (Version != 1 || BatterySafetyPercent < 15 || BatterySafetyPercent > 95)

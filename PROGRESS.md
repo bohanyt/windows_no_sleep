@@ -1,45 +1,38 @@
 # PROGRESS
 
-## Current native implementation — 2026-09-21
+## Current correction — 2026-09-21: screensaver / idle lock
 
-Active lane: `feat/v1-native-winforms`, SAME DRAFT PR #4. Version 0.4.0.0 is the bundled native V1 development candidate. No merge/release-candidate acceptance is implied.
+SAME `feat/v1-native-winforms` / DRAFT PR #4. Version 0.4.1.0 adds the missing primary screensaver capability. Owner direction/active scope: Issue #1 comment **5755803509**. Previous 0.4 `Protected` status did not mean autolock/screensaver was inhibited; the owner's password-screen report is a real acceptance failure.
 
-Owner explicitly requested all seven remaining features in one update, with manual testing consolidated at the end. Durable instruction: Issue #1 comment **5754988623**. The existing updater path remains `artifacts\local-current\WindowsNoSleep.exe`; no new clone or directory reorganization.
+Implemented: default-on session-only screensaver suppression with write-ahead recovery and readback; exact Stop/Exit/Battery Safety/suspend restoration; same-logon crash recovery; new-logon expiry without replaying stale volatile values; independent power/screensaver recovery attempts; backward-compatible setting; read-only lock-policy diagnostics; visible Degraded status on detected policy limits or lock observation. No password, secure-sign-in, manual-lock or enterprise-policy bypass.
 
-### Implemented together
+See `docs/SCREENSAVER_FIX.md` for the bounded mechanism, limits and one focused idle acceptance witness. Automated regressions run with fake desktop APIs alongside the full previous native suite before dev-latest publication. This source record does NOT predeclare the new CI result or endpoint PASS. Exact candidate SHA/CI/publication will be reported in Issue #1.
 
-- Direct SystemRequired request, with display-off still allowed.
-- Native shutdown reason window and session-end handling; normal requests may be blocked, critical/forced shutdown and logoff are allowed.
-- Battery monitor and safety controller: 15% base or higher readable Windows critical threshold +5, critical/unknown DC safety pause, hysteresis and safe AC resume.
-- Four-key native policy allowlist: LidAction AC/DC, SleepIdle DC, HibernateIdle DC. Hibernate timeout is included only when hibernation is present. No unrelated setting writes.
-- Durable versioned recovery storage; attempted-before-write ordering; rollback after partial failures; exact read-back restore before clearing pending recovery; next-launch recovery before new policy writes; external conflicts and invalid journals preserved.
-- ARR callback/restart registration, bounded crash-recovery lock attempt and Windows cancellation pings. Force-kill/power-loss recovery remains next-launch, not an instantaneous guarantee.
-- Opt-in Start with Windows checkbox (default OFF), owning one quoted direct-EXE HKCU Run value.
-- Settings/status for all capabilities, distinct tray state badges, diagnostics, bounded local logs and a last-restore receipt.
-- Single-instance mutex acquisition corrected to use actual ownership, with the existing five-second duplicate notice retained.
+Delivery unchanged: Exit old app -> double-click the EXISTING `Update Windows No Sleep.cmd` -> `artifacts\local-current\WindowsNoSleep.exe`. No new folder, clone, Git pull or ZIP is needed for the binary. Stable release remains blocked until the actual idle-lock failure and remaining acceptance requirements are resolved.
 
-### Automated validation
+Owner additionally reported AC lid clamshell behavior (internal panel off, HDMI primary) and DC lid behavior working. These are owner-reported observations, not independent timeout/overnight proof. No new restart-guard, crash-recovery or autostart PASS is inferred. Screensaver/lock-free physical acceptance is PENDING.
 
-`SelfTests.cs` covers fake-provider battery thresholds, controller lifecycle, policy write-ahead ordering, crash boundaries, rollback failures, conflict preservation, corrupt/foreign journals, settings, mutex ownership and startup command quoting. It does not create production startup entries or mutate live power settings. `native/tests/AbiCheck.cpp` validates capability offsets against the Windows SDK.
+## Bundled native 0.4 implementation — historical baseline
 
-The Actions workflow builds Release x64, runs those tests plus a real non-mutating PowerRequest self-test, records SHA-256/build ID and publishes the compatible five `dev-latest` assets only after success. Consult the exact-head Actions run and Issue #1 completion comment for actual outcomes; this source commit does not predeclare CI green.
+Owner requested all seven remaining features in one update, with manual testing consolidated at the end (Issue #1 **5754988623**). Candidate `4788830815b95b3d41ead67d9adfd9ddf8d0965a` was published as dev-latest after hosted tests. No merge or stable acceptance was implied.
 
-### Evidence already reported by the owner
+- Direct SystemRequired request, with display-off allowed.
+- Native shutdown reason window and session-end handling; normal requests may be blocked, critical/forced shutdown and logoff allowed.
+- Battery monitor: 15% base or readable critical threshold +5, critical/unknown DC pause, hysteresis and safe AC resume.
+- Four-key power allowlist: LidAction AC/DC, SleepIdle DC, HibernateIdle DC when hibernation is present.
+- Durable power journal, attempted-before-write ordering, partial rollback, exact readback restore and restore-before-protect; conflicting/invalid journals preserved.
+- ARR callback/restart registration; force-kill/power-loss recovery is next-launch, not instantaneous.
+- Opt-in Start with Windows (default OFF), one quoted direct-EXE HKCU Run value.
+- Capability UI, tray badges, diagnostics, bounded logs, restoration receipt, single owner and five-second duplicate notice.
 
-In the current conversation, screenshots show the native application/branding and countdown duplicate notice. The owner explicitly reports Start -> Protected -> Exit with window/tray/process cleanup working for the earlier native UI build. The updater was pulled locally and the resulting app opened.
+`SelfTests.cs` contains fake-provider battery/controller/policy/storage/ownership tests. `native/tests/AbiCheck.cpp` validates Windows SDK capability offsets. Actions builds Release x64, runs these regressions and a real non-mutating power request self-test, records SHA-256/build ID and publishes the five compatible dev-latest assets only after success.
 
-Those reports do not prove the new policy/ARR/battery/lid/restart/autostart paths. No unseen hash, endpoint-security product detail, closed-lid, DC, overnight or forced-crash result is invented.
-
-### Next operator action
-
-Once the complete candidate's exact-head CI/release is verified, Exit the old app and double-click the SAME `Update Windows No Sleep.cmd`. Open Settings from the tray. One consolidated final acceptance campaign is in `docs/NATIVE_V1_ACCEPTANCE.md`; no per-feature ZIP loop.
-
-Final native physical labels (`LID_VERIFIED`, `BATTERY_VERIFIED`, `HEADLESS_VERIFIED`, final `EDR_VERIFIED`) remain PENDING. Forced Windows actions, thermal protection and power loss are not defeated. A restore failure requires recovery attention, not more mutation tests.
+Earlier owner screenshots/reports established native app/branding, duplicate notice, updater launch and Start/Stop/Exit UI behavior. These are not full native policy/ARR/restart/autostart/overnight acceptance. Final labels remain pending where not actually evidenced.
 
 ## Historical reference — superseded paths
 
-- Old PowerShell PR #2 is CLOSED/superseded. Old Dispatch 004 remains HOLD/cancelled and must not be run.
-- Issue #3 recorded security quarantine involving the earlier PowerShell runtime/recovery path; the exact triggering heuristic was not established. No exclusion, policy bypass or renamed/packed workaround is authorized.
-- Earlier PowerShell physical evidence (read-only baseline, DC SleepIdle 1200 -> 0 -> 1200, AC lid closed with an external monitor) informs the native port but does not certify it.
-- The original 18-section native-pilot handoff on main described the earlier pending pilot. Its pilot-only sequencing is superseded for this source implementation by the current explicit owner bundle request, not by an invented PASS.
-- GitHub remains source of truth. Issue #3 stays open until current native endpoint/recovery acceptance is actually evidenced.
+- Old PowerShell PR #2 is CLOSED/superseded. Old Dispatch 004 remains HOLD/cancelled and must not run.
+- Issue #3 recorded security quarantine involving the earlier PowerShell runtime/recovery path; exact heuristic unconfirmed. No exclusion, policy bypass or repacking workaround is authorized.
+- Earlier PowerShell read-only baseline, DC SleepIdle 1200 -> 0 -> 1200, and AC lid/external-monitor evidence informs but does not certify the native port.
+- The original 18-section pilot handoff on main described the earlier pending pilot. Its sequencing was superseded for implementation by the explicit bundle request, not an invented physical PASS.
+- GitHub remains source of truth. Issue #3 remains open pending current native endpoint/recovery acceptance.

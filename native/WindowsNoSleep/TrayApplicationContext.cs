@@ -4,6 +4,7 @@ using System.Drawing;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 namespace WindowsNoSleep
 {
@@ -13,6 +14,7 @@ namespace WindowsNoSleep
         private readonly ShutdownWindow _lifecycle;
         private readonly ApplicationRecoveryRegistration _recovery;
         private readonly NamedOwnership _policyOwnership;
+        private readonly ScreenSaverProtection _screenSaver;
         private readonly NotifyIcon _notifyIcon;
         private readonly ContextMenuStrip _menu;
         private readonly ToolStripMenuItem _toggle;
@@ -20,7 +22,7 @@ namespace WindowsNoSleep
         private readonly Icon _brand;
         private readonly Dictionary<ProtectionState, Icon> _icons = new Dictionary<ProtectionState, Icon>();
         private SettingsForm _settings;
-        private bool _disposed;
+        private bool _disposed, _sessionEvents;
         private int _ticks;
         internal ProtectionController Controller { get; private set; }
         internal StartupManager Startup { get; private set; }
@@ -33,6 +35,7 @@ namespace WindowsNoSleep
             string warning;
             AppOptions options = _storage.LoadOptions(out warning);
             StartupWarning = warning;
+            if (warning != null) options.PreventScreenSaver = false; // Corrupt settings: no new session mutation.
             string policyError = null;
             try
             {
@@ -46,12 +49,15 @@ namespace WindowsNoSleep
             var platform = new WindowsPowerPlatform();
             var store = new NativeJournalStore(directory, machine, RuntimeStorage.UserId);
             var transaction = new PolicyTransaction(platform, store, _storage.Log);
+            _screenSaver = new ScreenSaverProtection(new WindowsScreenSaverPlatform(), new ScreenSaverJournalStore(directory), _storage.Log);
             _lifecycle = new ShutdownWindow(_storage.Log);
             Controller = new ProtectionController(options, platform, transaction, _lifecycle,
-                delegate { return PowerRequestLease.AcquireSystemRequired("Windows No Sleep is keeping computer workloads active while allowing the display to turn off."); }, _storage.Log);
+                delegate { return PowerRequestLease.AcquireSystemRequired("Windows No Sleep is keeping computer workloads active while allowing the display to turn off."); }, _storage.Log, _screenSaver);
             _recovery = new ApplicationRecoveryRegistration(Controller.RecoverForCrash);
             Controller.PolicyRecoveryReady = policyError == null && _recovery.Ready;
             Controller.PolicyRecoveryError = policyError ?? _recovery.Error;
+            _screenSaver.RecoveryReady = _recovery.Ready;
+            _screenSaver.RecoveryError = _recovery.Error;
             Startup = new StartupManager(Application.ExecutablePath);
             _lifecycle.CanBlock = Controller.MayBlockShutdown;
             _lifecycle.SessionEnded = delegate { Controller.Stop(); ExitThread(); };
@@ -77,8 +83,11 @@ namespace WindowsNoSleep
             _timer.Tick += delegate
             {
                 Controller.Poll(); RefreshUi();
-                if (++_ticks % 15 == 0) _storage.Log("HEARTBEAT state=" + Controller.State + " awake=" + Controller.IsAwake + " battery=" + BatteryText());
+                if (++_ticks % 15 == 0) _storage.Log("HEARTBEAT state=" + Controller.State + " awake=" + Controller.IsAwake
+                    + " screensaverSuppressed=" + _screenSaver.Active + " battery=" + BatteryText());
             };
+            try { SystemEvents.SessionSwitch += OnSessionSwitch; _sessionEvents = true; }
+            catch (Exception error) { _storage.Log("SESSION_OBSERVER_UNAVAILABLE " + error.Message); }
         }
         internal void Initialize()
         {
@@ -86,13 +95,26 @@ namespace WindowsNoSleep
             if (StartupWarning != null) _storage.Log(StartupWarning);
             Controller.Start();
             RefreshUi(); _timer.Start();
-            if (Controller.RecoveryPending && !Controller.IsAwake) ShowSettings();
+            if ((Controller.RecoveryPending && !Controller.IsAwake) || Controller.ScreenSaverWarning != null) ShowSettings();
+        }
+        private void OnSessionSwitch(object sender, SessionSwitchEventArgs args)
+        {
+            if (_disposed || !_lifecycle.IsHandleCreated) return;
+            try
+            {
+                _lifecycle.BeginInvoke((Action)delegate
+                {
+                    if (_disposed) return;
+                    if (args.Reason == SessionSwitchReason.SessionLock) _screenSaver.ObserveSessionLock();
+                    if (args.Reason == SessionSwitchReason.SessionUnlock) _storage.Log("SESSION_UNLOCK_OBSERVED");
+                    Controller.Poll(); RefreshUi();
+                });
+            }
+            catch (InvalidOperationException) { }
         }
         private void QueuePowerEvent(int code)
         {
             if (_disposed || !_lifecycle.IsHandleCreated) return;
-            // Queue broadcasts to avoid re-entering a power transaction from inside
-            // a Win32 refresh. The durable journal also covers interrupted suspend.
             try
             {
                 _lifecycle.BeginInvoke((Action)delegate
@@ -157,9 +179,12 @@ namespace WindowsNoSleep
             var text = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill };
             text.Text = "Version: " + Application.ProductVersion + "\r\nBuild: " + BuildId() + "\r\nState: " + Controller.State
                 + "\r\n" + Controller.Detail + "\r\n" + BatteryText() + "\r\nPolicy: " + Controller.PolicyDetail
-                + "\r\nRecovery pending: " + Controller.RecoveryPending + "\r\nARR registered: " + _recovery.Ready
+                + "\r\nScreensaver: " + Controller.ScreenSaverDetail + "\r\nIdle-lock limitation: " + (Controller.ScreenSaverWarning ?? "none detected (not an exhaustive policy inventory)")
+                + "\r\nSession lock observation registered: " + _sessionEvents
+                + "\r\nRecovery pending (includes active restore snapshots): " + Controller.RecoveryPending + "\r\nARR registered: " + _recovery.Ready
                 + "\r\nData: " + _storage.DirectoryPath
-                + "\r\nLimits: forced shutdown, thermal protection, critical battery and enterprise policy override this app."
+                + "\r\nLimits: manual Win+L, Dynamic Lock/presence sensing, enterprise policy, forced shutdown and thermal/critical-battery safety remain authoritative."
+                + "\r\nScreenSaverIsSecure/passwords are NOT disabled; only ordinary screensaver activation is suppressed."
                 + "\r\nPower loss/force-kill recovery happens on next launch; ARR is best effort.\r\n\r\n" + _storage.ReadLog();
             form.Controls.Add(text);
             form.Show();
@@ -183,7 +208,7 @@ namespace WindowsNoSleep
         {
             Controller.Stop();
             if (Controller.RecoveryPending)
-                MessageBox.Show("Some original Windows settings could not be restored. The recovery journal is preserved; the next launch will retry before applying any new settings.\n\n" + Controller.PolicyDetail,
+                MessageBox.Show("Some original Windows settings could not be restored. Recovery records are preserved; the next launch will retry before applying new settings.\n\n" + Controller.PolicyDetail + "\n" + Controller.ScreenSaverDetail,
                     "Windows No Sleep - recovery pending", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             ExitThread();
         }
@@ -193,6 +218,7 @@ namespace WindowsNoSleep
             if (disposing && !_disposed)
             {
                 _disposed = true;
+                if (_sessionEvents) SystemEvents.SessionSwitch -= OnSessionSwitch;
                 _timer.Stop(); _timer.Dispose();
                 Controller.Stop();
                 _notifyIcon.Visible = false; _notifyIcon.Dispose();

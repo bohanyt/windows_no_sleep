@@ -12,10 +12,14 @@ namespace WindowsNoSleep
         [STAThread]
         private static int Main(string[] args)
         {
-            // These test paths exit before settings, startup entries, policy writes,
-            // normal tray initialization or production recovery are ever touched.
+            // Tests exit before production settings, registry, screensaver or policy initialization.
             if (args.Length == 1 && args[0] == "--self-test") return RunSelfTest();
-            if (args.Length == 2 && args[0] == "--test-suite") return SelfTests.Run(args[1]);
+            if (args.Length == 2 && args[0] == "--test-suite")
+            {
+                int core = SelfTests.Run(args[1]);
+                int desktop = ScreenSaverTests.Run(args[1]);
+                return core != 0 ? core : desktop;
+            }
             if (args.Any(arg => arg != "--autostart" && arg != "--recovered")) return 64;
             bool quietDuplicate = args.Length != 0;
             Application.EnableVisualStyles();
@@ -28,7 +32,6 @@ namespace WindowsNoSleep
                     if (!owner.Acquired) return quietDuplicate ? 0 : ShowAlreadyRunning();
                     string directory = RuntimeStorage.DefaultPath;
                     Directory.CreateDirectory(directory);
-                    // Also serialize same-account instances in different Windows sessions.
                     FileStream fileOwner;
                     try { fileOwner = new FileStream(Path.Combine(directory, "owner.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
                     catch (IOException error)

@@ -52,6 +52,8 @@
     <Compile Include="PolicyTransaction.cs" />
     <Compile Include="RuntimeStorage.cs" />
     <Compile Include="ProtectionController.cs" />
+    <Compile Include="ScreenSaverProtection.cs" />
+    <Compile Include="ScreenSaverTests.cs" />
     <Compile Include="WindowsLifecycle.cs" />
     <Compile Include="TrayApplicationContext.cs" />
     <Compile Include="SettingsForm.cs" />

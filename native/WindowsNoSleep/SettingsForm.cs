@@ -7,8 +7,8 @@ namespace WindowsNoSleep
     internal sealed class SettingsForm : Form
     {
         private readonly TrayApplicationContext _context;
-        private readonly Label _status, _power, _policy;
-        private readonly CheckBox _onBattery, _lid, _timeouts, _shutdown, _startup;
+        private readonly Label _status, _power, _policy, _desktop;
+        private readonly CheckBox _screenSaver, _onBattery, _lid, _timeouts, _shutdown, _startup;
         private readonly NumericUpDown _threshold;
         private readonly Button _toggle;
         private bool _binding;
@@ -25,9 +25,11 @@ namespace WindowsNoSleep
             MaximizeBox = false; StartPosition = FormStartPosition.CenterScreen;
             var layout = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 1, Padding = new Padding(18) };
             layout.Controls.Add(new Label { Text = "Windows No Sleep", AutoSize = true, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(0, 0, 0, 12) });
-            _status = Paragraph(); _power = Paragraph(); _policy = Paragraph();
-            layout.Controls.Add(_status); layout.Controls.Add(_power); layout.Controls.Add(_policy);
-            layout.Controls.Add(Paragraph("Your display may turn off. No Windows Update services or critical-battery actions are disabled."));
+            _status = Paragraph(); _desktop = Paragraph(); _power = Paragraph(); _policy = Paragraph();
+            layout.Controls.Add(_status); layout.Controls.Add(_desktop); layout.Controls.Add(_power); layout.Controls.Add(_policy);
+            _screenSaver = Option("Prevent screensaver and its automatic sign-in prompt");
+            layout.Controls.Add(_screenSaver);
+            layout.Controls.Add(Paragraph("Manual lock and enforced Windows lock policy still apply. Your display may turn off without the computer sleeping."));
             _onBattery = Option("Keep protecting while on battery");
             _lid = Option("Keep running when the lid is closed");
             _timeouts = Option("Prevent battery sleep / hibernate timeouts");
@@ -53,6 +55,7 @@ namespace WindowsNoSleep
             layout.Controls.Add(buttons);
             layout.Controls.Add(Paragraph("Close hides this window. To quit, right-click the tray icon and choose Exit."));
             Controls.Add(layout);
+            _screenSaver.CheckedChanged += SaveProtectionOptions;
             _onBattery.CheckedChanged += SaveProtectionOptions;
             _lid.CheckedChanged += SaveProtectionOptions;
             _timeouts.CheckedChanged += SaveProtectionOptions;
@@ -83,6 +86,7 @@ namespace WindowsNoSleep
         {
             if (_binding) return;
             var options = _context.Controller.Options.Copy();
+            options.PreventScreenSaver = _screenSaver.Checked;
             options.ProtectOnBattery = _onBattery.Checked;
             options.LidProtection = _lid.Checked;
             options.DcTimeoutProtection = _timeouts.Checked;
@@ -103,10 +107,12 @@ namespace WindowsNoSleep
             {
                 var core = _context.Controller;
                 _status.Text = core.State + "\n" + core.Detail;
+                _desktop.Text = "Screensaver / idle lock: " + core.ScreenSaverDetail;
                 _power.Text = _context.BatteryText();
                 _policy.Text = "Temporary settings: " + core.PolicyDetail
                     + "\nRestart guard: " + (core.GuardActive ? "Active - Windows can override it" : "Off")
                     + (_context.StartupWarning == null ? "" : "\n" + _context.StartupWarning);
+                _screenSaver.Checked = core.Options.PreventScreenSaver != false;
                 _onBattery.Checked = core.Options.ProtectOnBattery;
                 _lid.Checked = core.Options.LidProtection;
                 _timeouts.Checked = core.Options.DcTimeoutProtection;
