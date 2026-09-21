@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: write
+
 jobs:
   build-and-self-test:
     runs-on: windows-latest
@@ -48,6 +51,7 @@ jobs:
 
           $hash = Get-FileHash $out\WindowsNoSleep.exe -Algorithm SHA256
           "$($hash.Hash)  WindowsNoSleep.exe" | Set-Content $out\SHA256SUMS.txt -Encoding ascii
+          "$env:GITHUB_SHA" | Set-Content $out\BUILD_SHA.txt -Encoding ascii
           "Native pilot SHA-256: $($hash.Hash)" | Add-Content $env:GITHUB_STEP_SUMMARY
           "Signing status: UNSIGNED PILOT" | Add-Content $env:GITHUB_STEP_SUMMARY
 
@@ -57,3 +61,19 @@ jobs:
           name: WindowsNoSleep-native-pilot
           path: artifacts/native-pilot
           if-no-files-found: error
+
+      - name: Publish rolling dev build
+        if: github.event_name == 'push'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $out = '.\artifacts\native-pilot'
+          gh release view dev-latest --repo "$env:GITHUB_REPOSITORY" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release delete dev-latest --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to replace dev-latest release."
+            }
+          }
+          gh release create dev-latest "$out\WindowsNoSleep.exe" "$out\WindowsNoSleep.exe.config" "$out\README.txt" "$out\SHA256SUMS.txt" "$out\BUILD_SHA.txt" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title "Windows No Sleep dev-latest" --notes "Rolling development build from feat/v1-native-winforms. Unsigned; intended for local testing." --prerelease
