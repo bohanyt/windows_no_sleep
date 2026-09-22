@@ -197,6 +197,7 @@ namespace WindowsNoSleep
             {
                 _wanted = false; _batteryPaused = false;
                 string error = ReleaseOwned();
+                if (_screenSaver != null) _screenSaver.AllowAdministratorRetry();
                 _faulted = error != null;
                 SetState(error == null ? ProtectionState.Stopped : ProtectionState.Degraded,
                     error == null ? "Protection stopped - Windows screensaver and sleep settings restored." : "Protection stopped; restore needs attention. " + error);

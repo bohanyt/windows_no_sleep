@@ -22,6 +22,7 @@ namespace WindowsNoSleep
         void Start(bool enabled);
         void Poll();
         void Restore();
+        void AllowAdministratorRetry();
     }
     internal sealed class ScreenSaverState
     {
@@ -106,7 +107,7 @@ namespace WindowsNoSleep
         private readonly IMachineInactivityStore _machineStore;
         private readonly Action<string> _log;
         private string _profile, _lockObserved;
-        private bool _machineActive;
+        private bool _machineActive, _administratorDenied;
         private uint _machineOriginal;
         internal bool RecoveryReady = true;
         internal string RecoveryError;
@@ -154,19 +155,38 @@ namespace WindowsNoSleep
                     var machineBefore = _machine.ReadMachineInactivity();
                     if (machineBefore.Exists && machineBefore.Seconds > 0)
                     {
-                        if (!RecoveryReady) throw new InvalidOperationException("Recovery unavailable: " + RecoveryError);
-                        var machineRecord = new MachineInactivityRecord { OriginalSeconds = machineBefore.Seconds };
-                        _machineStore.Save(machineRecord);
-                        var machineCheck = _machine.ReadMachineInactivity();
-                        if (!machineCheck.Exists || machineCheck.Seconds != machineBefore.Seconds)
-                            throw new InvalidOperationException("Machine inactivity policy changed during startup.");
-                        _machine.SetMachineInactivity(0);
-                        var machineAfter = _machine.ReadMachineInactivity();
-                        if (!machineAfter.Exists || machineAfter.Seconds != 0)
-                            throw new InvalidOperationException("Windows did not verify the temporary machine-inactivity override.");
-                        _machineActive = true;
-                        _machineOriginal = machineBefore.Seconds;
-                        _log("MACHINE_INACTIVITY_ACTIVE originalSeconds=" + _machineOriginal + " temporary=0");
+                        if (_administratorDenied)
+                        {
+                            _log("MACHINE_INACTIVITY_ADMIN_SKIPPED reason=previously_cancelled");
+                        }
+                        else
+                        {
+                            if (!RecoveryReady) throw new InvalidOperationException("Recovery unavailable: " + RecoveryError);
+                            var machineRecord = new MachineInactivityRecord { OriginalSeconds = machineBefore.Seconds };
+                            _machineStore.Save(machineRecord);
+                            var machineCheck = _machine.ReadMachineInactivity();
+                            if (!machineCheck.Exists || machineCheck.Seconds != machineBefore.Seconds)
+                                throw new InvalidOperationException("Machine inactivity policy changed during startup.");
+                            try
+                            {
+                                _machine.SetMachineInactivity(0);
+                            }
+                            catch (OperationCanceledException)
+                            {
+                                _administratorDenied = true;
+                                RestoreMachineInactivity();
+                                _log("MACHINE_INACTIVITY_ADMIN_CANCELLED no_retry_until_explicit_action=true");
+                            }
+                            if (!_administratorDenied)
+                            {
+                                var machineAfter = _machine.ReadMachineInactivity();
+                                if (!machineAfter.Exists || machineAfter.Seconds != 0)
+                                    throw new InvalidOperationException("Windows did not verify the temporary machine-inactivity override.");
+                                _machineActive = true;
+                                _machineOriginal = machineBefore.Seconds;
+                                _log("MACHINE_INACTIVITY_ACTIVE originalSeconds=" + _machineOriginal + " temporary=0");
+                            }
+                        }
                     }
                 }
 
@@ -175,10 +195,12 @@ namespace WindowsNoSleep
                     throw new InvalidOperationException("Windows did not verify screensaver suppression.");
                 _profile = before.ProfileStamp;
                 Active = true;
-                Warning = after.LockWarning;
+                Warning = _administratorDenied
+                    ? "Administrator approval was cancelled. Local machine inactivity auto-lock remains enabled. Use Retry administrator protection or Stop then Start to ask again."
+                    : after.LockWarning;
                 Detail = _machineActive
                     ? "Active - screensaver and local machine inactivity auto-lock prevented"
-                    : "Active - ordinary screensaver and its automatic sign-in prompt prevented";
+                    : "Active - ordinary screensaver prevented; local machine inactivity protection is not active";
                 _log("SCREENSAVER_ACTIVE verifiedDisabled=true original=" + before.Enabled + " timeoutSeconds=" + before.Timeout
                     + " passwordOnResume=" + before.Secure + " machineInactivityOverridden=" + _machineActive
                     + " lockLimit=" + (Warning ?? "none detected"));
@@ -192,6 +214,10 @@ namespace WindowsNoSleep
                 _log("SCREENSAVER_UNAVAILABLE " + Warning);
                 if (rollback != null) throw new InvalidOperationException(Warning, error);
             }
+        }
+        public void AllowAdministratorRetry()
+        {
+            _administratorDenied = false;
         }
         public void Poll()
         {

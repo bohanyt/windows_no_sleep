@@ -17,7 +17,7 @@ namespace WindowsNoSleep
             internal bool Elevated, MachineExists, FailMachineWrite, FailMachineRestore, CancelElevation;
             internal uint MachineSeconds;
             internal string Stamp = "profile-unchanged", UserId = "test-user", LogonId = "test-logon", LockWarning;
-            internal int Writes, MachineWrites;
+            internal int Writes, MachineWrites, MachineAttempts;
             internal readonly List<string> Trace = new List<string>();
             public string User { get { return UserId; } }
             public string Logon { get { return LogonId; } }
@@ -47,6 +47,7 @@ namespace WindowsNoSleep
             }
             public void SetMachineInactivity(uint seconds)
             {
+                MachineAttempts++;
                 if (!Elevated && CancelElevation) throw new OperationCanceledException("Administrator approval was cancelled.");
                 if (seconds == 0 && FailMachineWrite) throw new IOException("machine write failed");
                 if (seconds != 0 && FailMachineRestore) throw new IOException("machine restore failed");
@@ -217,12 +218,18 @@ namespace WindowsNoSleep
                     && r.Protection.Warning == null); r.Protection.Restore();
                 Assert(r.Desktop.MachineSeconds == 900 && r.Desktop.MachineWrites == 2);
             });
-            test("cancelled administrator approval leaves no machine mutation", delegate
+            test("cancelled administrator approval is latched without UAC spam", delegate
             {
                 var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.CancelElevation = true;
                 r.Protection.Start(true);
-                Assert(!r.Protection.Active && r.Desktop.MachineSeconds == 900 && !r.MachineStore.Exists
-                    && r.Protection.Warning.Contains("cancelled"));
+                Assert(r.Protection.Active && r.Desktop.MachineSeconds == 900 && !r.MachineStore.Exists
+                    && r.Protection.Warning.Contains("cancelled") && r.Desktop.MachineAttempts == 1);
+                r.Protection.Poll();
+                r.Protection.Start(true);
+                Assert(r.Desktop.MachineAttempts == 1 && r.Desktop.MachineSeconds == 900);
+                r.Protection.AllowAdministratorRetry();
+                r.Protection.Start(true);
+                Assert(r.Desktop.MachineAttempts == 2);
             });
             test("admin temporarily disables and restores local machine inactivity policy", delegate
             {
@@ -329,11 +336,14 @@ namespace WindowsNoSleep
                 Assert(r.Core.State == ProtectionState.Protected && r.Desktop.Desktop.MachineSeconds == 0);
                 r.Core.Stop(); Assert(r.Desktop.Desktop.MachineSeconds == 900);
             });
-            test("controller cancelled admin approval is Degraded without mutation", delegate
+            test("controller cancelled admin approval stays Degraded without repeated prompt", delegate
             {
                 var r = new CoreRig(true, false); r.Desktop.Desktop.CancelElevation = true; r.Core.Start();
                 Assert(r.Core.State == ProtectionState.Degraded && r.Desktop.Desktop.MachineSeconds == 900
-                    && !r.Desktop.MachineStore.Exists); r.Core.Stop();
+                    && !r.Desktop.MachineStore.Exists && r.Desktop.Desktop.MachineAttempts == 1);
+                r.Core.Poll(); r.Core.Poll();
+                Assert(r.Desktop.Desktop.MachineAttempts == 1);
+                r.Core.Stop();
             });
             test("controller managed lock warning yields Degraded", delegate
             {
