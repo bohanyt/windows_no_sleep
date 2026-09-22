@@ -14,7 +14,7 @@ namespace WindowsNoSleep
         private sealed class Desktop : IScreenSaverPlatform, IMachineInactivityPlatform
         {
             internal bool Enabled = true, Managed, IgnoreWrite, ThrowAfterDisable, FailRestore;
-            internal bool Elevated, MachineExists, FailMachineWrite, FailMachineRestore;
+            internal bool Elevated, MachineExists, FailMachineWrite, FailMachineRestore, CancelElevation;
             internal uint MachineSeconds;
             internal string Stamp = "profile-unchanged", UserId = "test-user", LogonId = "test-logon", LockWarning;
             internal int Writes, MachineWrites;
@@ -47,7 +47,7 @@ namespace WindowsNoSleep
             }
             public void SetMachineInactivity(uint seconds)
             {
-                if (!Elevated) throw new UnauthorizedAccessException("admin required");
+                if (!Elevated && CancelElevation) throw new OperationCanceledException("Administrator approval was cancelled.");
                 if (seconds == 0 && FailMachineWrite) throw new IOException("machine write failed");
                 if (seconds != 0 && FailMachineRestore) throw new IOException("machine restore failed");
                 MachineWrites++; Trace.Add("machine=" + seconds);
@@ -210,11 +210,19 @@ namespace WindowsNoSleep
                 var r = new Rig(); r.Desktop.LockWarning = "Windows requires lock after 60 seconds"; r.Protection.Start(true);
                 Assert(r.Protection.Warning.Contains("60 seconds")); r.Protection.Restore();
             });
-            test("local machine inactivity policy requires admin", delegate
+            test("non-admin main can use elevated machine helper", delegate
             {
                 var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Protection.Start(true);
-                Assert(r.Protection.Active && r.Desktop.MachineSeconds == 900 && r.Desktop.MachineWrites == 0
-                    && r.Protection.Warning.Contains("administrator")); r.Protection.Restore();
+                Assert(r.Protection.Active && r.Desktop.MachineSeconds == 0 && r.Desktop.MachineWrites == 1
+                    && r.Protection.Warning == null); r.Protection.Restore();
+                Assert(r.Desktop.MachineSeconds == 900 && r.Desktop.MachineWrites == 2);
+            });
+            test("cancelled administrator approval leaves no machine mutation", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.CancelElevation = true;
+                r.Protection.Start(true);
+                Assert(!r.Protection.Active && r.Desktop.MachineSeconds == 900 && !r.MachineStore.Exists
+                    && r.Protection.Warning.Contains("cancelled"));
             });
             test("admin temporarily disables and restores local machine inactivity policy", delegate
             {
@@ -315,11 +323,17 @@ namespace WindowsNoSleep
                 Assert(r.Core.State == ProtectionState.Protected && r.Desktop.Desktop.MachineSeconds == 0);
                 r.Core.Stop(); Assert(r.Desktop.Desktop.MachineSeconds == 900);
             });
-            test("controller non-admin local inactivity policy is Degraded", delegate
+            test("controller non-admin main reaches Protected through helper", delegate
             {
                 var r = new CoreRig(true, false); r.Core.Start();
-                Assert(r.Core.State == ProtectionState.Degraded && r.Core.Detail.Contains("administrator"));
-                r.Core.Stop();
+                Assert(r.Core.State == ProtectionState.Protected && r.Desktop.Desktop.MachineSeconds == 0);
+                r.Core.Stop(); Assert(r.Desktop.Desktop.MachineSeconds == 900);
+            });
+            test("controller cancelled admin approval is Degraded without mutation", delegate
+            {
+                var r = new CoreRig(true, false); r.Desktop.Desktop.CancelElevation = true; r.Core.Start();
+                Assert(r.Core.State == ProtectionState.Degraded && r.Desktop.Desktop.MachineSeconds == 900
+                    && !r.Desktop.MachineStore.Exists); r.Core.Stop();
             });
             test("controller managed lock warning yields Degraded", delegate
             {
