@@ -29,9 +29,9 @@ namespace WindowsNoSleep
             layout.Controls.Add(_status); layout.Controls.Add(_desktop); layout.Controls.Add(_power); layout.Controls.Add(_policy);
             _screenSaver = Option("Prevent screensaver and automatic idle lock");
             layout.Controls.Add(_screenSaver);
-            layout.Controls.Add(Paragraph("If a local machine inactivity limit is configured, run as administrator so Windows No Sleep can temporarily set it to Never and restore it later. Domain/MDM policy may reapply it."));
-            _admin = new Button { Text = "Restart as administrator", AutoSize = true, MinimumSize = new Size(180, 30), Visible = false };
-            _admin.Click += delegate { _context.RestartAsAdministrator(); };
+            layout.Controls.Add(Paragraph("If a local machine inactivity limit is configured, Windows No Sleep requests administrator approval only for that policy change. The main app stays in your signed-in account. Domain/MDM policy may reapply it."));
+            _admin = new Button { Text = "Retry administrator protection", AutoSize = true, MinimumSize = new Size(200, 30), Visible = false };
+            _admin.Click += delegate { _context.RetryAdministratorIdleLock(); };
             layout.Controls.Add(_admin);
             _onBattery = Option("Keep protecting while on battery");
             _lid = Option("Keep running when the lid is closed");

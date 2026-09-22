@@ -154,22 +154,19 @@ namespace WindowsNoSleep
                     var machineBefore = _machine.ReadMachineInactivity();
                     if (machineBefore.Exists && machineBefore.Seconds > 0)
                     {
-                        if (_machine.IsElevated)
-                        {
-                            if (!RecoveryReady) throw new InvalidOperationException("Recovery unavailable: " + RecoveryError);
-                            var machineRecord = new MachineInactivityRecord { OriginalSeconds = machineBefore.Seconds };
-                            _machineStore.Save(machineRecord);
-                            var machineCheck = _machine.ReadMachineInactivity();
-                            if (!machineCheck.Exists || machineCheck.Seconds != machineBefore.Seconds)
-                                throw new InvalidOperationException("Machine inactivity policy changed during startup.");
-                            _machine.SetMachineInactivity(0);
-                            var machineAfter = _machine.ReadMachineInactivity();
-                            if (!machineAfter.Exists || machineAfter.Seconds != 0)
-                                throw new InvalidOperationException("Windows did not verify the temporary machine-inactivity override.");
-                            _machineActive = true;
-                            _machineOriginal = machineBefore.Seconds;
-                            _log("MACHINE_INACTIVITY_ACTIVE originalSeconds=" + _machineOriginal + " temporary=0");
-                        }
+                        if (!RecoveryReady) throw new InvalidOperationException("Recovery unavailable: " + RecoveryError);
+                        var machineRecord = new MachineInactivityRecord { OriginalSeconds = machineBefore.Seconds };
+                        _machineStore.Save(machineRecord);
+                        var machineCheck = _machine.ReadMachineInactivity();
+                        if (!machineCheck.Exists || machineCheck.Seconds != machineBefore.Seconds)
+                            throw new InvalidOperationException("Machine inactivity policy changed during startup.");
+                        _machine.SetMachineInactivity(0);
+                        var machineAfter = _machine.ReadMachineInactivity();
+                        if (!machineAfter.Exists || machineAfter.Seconds != 0)
+                            throw new InvalidOperationException("Windows did not verify the temporary machine-inactivity override.");
+                        _machineActive = true;
+                        _machineOriginal = machineBefore.Seconds;
+                        _log("MACHINE_INACTIVITY_ACTIVE originalSeconds=" + _machineOriginal + " temporary=0");
                     }
                 }
 
@@ -262,9 +259,6 @@ namespace WindowsNoSleep
             if (current.Seconds != 0)
                 throw new InvalidOperationException("Machine inactivity policy changed externally to " + current.Seconds
                     + " seconds; original " + record.OriginalSeconds + " preserved in recovery record.");
-            if (!_machine.IsElevated)
-                throw new InvalidOperationException("Run Windows No Sleep as administrator to restore the original machine inactivity policy ("
-                    + record.OriginalSeconds + " seconds).");
             _machine.SetMachineInactivity(record.OriginalSeconds);
             var after = _machine.ReadMachineInactivity();
             if (!after.Exists || after.Seconds != record.OriginalSeconds)
@@ -443,7 +437,7 @@ namespace WindowsNoSleep
             var inactivity = ReadMachineInactivity();
             if (inactivity.Exists && inactivity.Seconds > 0)
                 warnings.Add("Windows machine inactivity policy requires lock after " + inactivity.Seconds
-                    + " seconds. Run Windows No Sleep as administrator to temporarily disable it while Protection is active.");
+                    + " seconds. Administrator approval is required to temporarily disable it while Protection is active.");
             long deviceLock = Number(Registry.LocalMachine, @"SOFTWARE\Microsoft\PolicyManager\current\device\DeviceLock", "MaxInactivityTimeDeviceLock");
             if (deviceLock > 0) warnings.Add("Device/MDM policy requires automatic lock after " + deviceLock + " minutes; not overridden.");
             if (Number(Registry.CurrentUser, @"Software\Microsoft\Windows NT\CurrentVersion\Winlogon", "EnableGoodbye") > 0)
@@ -479,8 +473,58 @@ namespace WindowsNoSleep
         }
         public void SetMachineInactivity(uint seconds)
         {
-            if (!IsElevated)
-                throw new UnauthorizedAccessException("Run Windows No Sleep as administrator to change the local machine inactivity policy.");
+            if (IsElevated)
+            {
+                WriteMachineInactivity(seconds);
+                return;
+            }
+
+            string executable = Process.GetCurrentProcess().MainModule.FileName;
+            try
+            {
+                using (var helper = Process.Start(new ProcessStartInfo(executable,
+                    "--machine-inactivity-helper " + seconds.ToString(System.Globalization.CultureInfo.InvariantCulture))
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                }))
+                {
+                    if (helper == null) throw new InvalidOperationException("Administrator helper did not start.");
+                    if (!helper.WaitForExit(60000))
+                    {
+                        try { helper.Kill(); } catch { }
+                        throw new TimeoutException("Administrator helper timed out.");
+                    }
+                    if (helper.ExitCode != 0)
+                        throw new InvalidOperationException("Administrator helper failed with exit code " + helper.ExitCode + ".");
+                }
+            }
+            catch (Win32Exception error)
+            {
+                if ((error.NativeErrorCode & 0xffff) == 1223)
+                    throw new OperationCanceledException("Administrator approval was cancelled.");
+                throw;
+            }
+        }
+        internal static int RunMachineInactivityHelper(string value)
+        {
+            uint seconds;
+            if (!uint.TryParse(value, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out seconds)) return 64;
+            try
+            {
+                var platform = new WindowsScreenSaverPlatform();
+                if (!platform.IsElevated) return 5;
+                platform.WriteMachineInactivity(seconds);
+                var after = platform.ReadMachineInactivity();
+                return after.Exists && after.Seconds == seconds ? 0 : 3;
+            }
+            catch { return 1; }
+        }
+        private void WriteMachineInactivity(uint seconds)
+        {
             const string path = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System";
             using (var hive = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
             using (var key = hive.OpenSubKey(path, true))

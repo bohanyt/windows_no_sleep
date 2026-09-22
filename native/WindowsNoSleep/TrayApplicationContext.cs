@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
-using System.Diagnostics;
-using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
@@ -153,33 +151,16 @@ namespace WindowsNoSleep
             get
             {
                 string warning = Controller.ScreenSaverWarning;
-                return warning != null && warning.IndexOf("administrator", StringComparison.OrdinalIgnoreCase) >= 0;
+                return warning != null
+                    && (warning.IndexOf("administrator", StringComparison.OrdinalIgnoreCase) >= 0
+                        || warning.IndexOf("approval", StringComparison.OrdinalIgnoreCase) >= 0);
             }
         }
-        internal void RestartAsAdministrator()
+        internal void RetryAdministratorIdleLock()
         {
             Controller.Stop();
-            if (Controller.RecoveryPending)
-            {
-                MessageBox.Show("Original settings still need recovery. Run the current executable as administrator manually so Windows No Sleep can restore them before continuing.",
-                    "Windows No Sleep", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                return;
-            }
-            try
-            {
-                Process.Start(new ProcessStartInfo(Application.ExecutablePath)
-                {
-                    UseShellExecute = true,
-                    Verb = "runas",
-                    WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory
-                });
-                ExitThread();
-            }
-            catch (Win32Exception error)
-            {
-                if ((error.NativeErrorCode & 0xffff) != 1223)
-                    MessageBox.Show(error.Message, "Windows No Sleep", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-            }
+            Controller.Start();
+            RefreshUi();
         }
         internal void ShowSettings()
         {

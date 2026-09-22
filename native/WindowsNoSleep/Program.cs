@@ -12,6 +12,9 @@ namespace WindowsNoSleep
         [STAThread]
         private static int Main(string[] args)
         {
+            // Privileged helper exits before normal user settings, mutex/tray, or recovery initialization.
+            if (args.Length == 2 && args[0] == "--machine-inactivity-helper")
+                return WindowsScreenSaverPlatform.RunMachineInactivityHelper(args[1]);
             // Tests exit before production settings, registry, screensaver or policy initialization.
             if (args.Length == 1 && args[0] == "--self-test") return RunSelfTest();
             if (args.Length == 2 && args[0] == "--test-suite")
