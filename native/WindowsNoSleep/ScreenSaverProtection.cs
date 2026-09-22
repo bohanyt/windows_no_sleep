@@ -7,6 +7,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization;
 using System.Security.Cryptography;
+using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32;
@@ -406,6 +407,9 @@ namespace WindowsNoSleep
     }
     internal sealed class WindowsScreenSaverPlatform : IScreenSaverPlatform, IMachineInactivityPlatform
     {
+        private Process _brokerProcess;
+        private EventWaitHandle _brokerRestoreEvent;
+        private EventWaitHandle _brokerReadyEvent;
         // Microsoft: SystemParametersInfoW / SPI_GETSCREENSAVEACTIVE (0x10),
         // SPI_SETSCREENSAVEACTIVE (0x11), fWinIni=0 leaves the user profile intact.
         // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-systemparametersinfow
@@ -505,6 +509,99 @@ namespace WindowsNoSleep
                 return;
             }
 
+            CleanupExitedBroker();
+            if (seconds == 0)
+            {
+                StartMachineInactivityBroker();
+                return;
+            }
+
+            if (_brokerProcess != null)
+            {
+                RestoreThroughBroker(seconds);
+                return;
+            }
+
+            RunOneShotMachineInactivityHelper(seconds);
+        }
+        private void StartMachineInactivityBroker()
+        {
+            var before = ReadMachineInactivity();
+            if (!before.Exists || before.Seconds == 0) return;
+
+            string nonce = Guid.NewGuid().ToString("N");
+            string restoreName = @"Local\WindowsNoSleep-MachineRestore-" + nonce;
+            string readyName = @"Local\WindowsNoSleep-MachineReady-" + nonce;
+            _brokerRestoreEvent = CreateCrossUserEvent(restoreName);
+            _brokerReadyEvent = CreateCrossUserEvent(readyName);
+
+            string executable = Process.GetCurrentProcess().MainModule.FileName;
+            string arguments = "--machine-inactivity-broker "
+                + Process.GetCurrentProcess().Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + " "
+                + restoreName + " " + readyName + " "
+                + before.Seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            try
+            {
+                _brokerProcess = Process.Start(new ProcessStartInfo(executable, arguments)
+                {
+                    UseShellExecute = true,
+                    Verb = "runas",
+                    WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                    WindowStyle = ProcessWindowStyle.Hidden
+                });
+                if (_brokerProcess == null) throw new InvalidOperationException("Administrator broker did not start.");
+
+                DateTime deadline = DateTime.UtcNow.AddSeconds(60);
+                while (!_brokerReadyEvent.WaitOne(100))
+                {
+                    if (_brokerProcess.HasExited)
+                        throw new InvalidOperationException("Administrator broker exited before protection was ready (code "
+                            + _brokerProcess.ExitCode + ").");
+                    if (DateTime.UtcNow >= deadline)
+                        throw new TimeoutException("Administrator broker timed out.");
+                }
+                var after = ReadMachineInactivity();
+                if (!after.Exists || after.Seconds != 0)
+                    throw new InvalidOperationException("Administrator broker did not verify the machine inactivity override.");
+            }
+            catch (Win32Exception error)
+            {
+                DisposeBrokerResources();
+                if ((error.NativeErrorCode & 0xffff) == 1223)
+                    throw new OperationCanceledException("Administrator approval was cancelled.");
+                throw;
+            }
+            catch
+            {
+                if (_brokerProcess != null && !_brokerProcess.HasExited)
+                {
+                    try { _brokerRestoreEvent.Set(); } catch { }
+                    try { _brokerProcess.WaitForExit(5000); } catch { }
+                }
+                DisposeBrokerResources();
+                throw;
+            }
+        }
+        private void RestoreThroughBroker(uint expected)
+        {
+            try
+            {
+                _brokerRestoreEvent.Set();
+                if (!_brokerProcess.WaitForExit(60000))
+                    throw new TimeoutException("Administrator broker timed out while restoring the machine inactivity policy.");
+                if (_brokerProcess.ExitCode != 0)
+                    throw new InvalidOperationException("Administrator broker restore failed with exit code " + _brokerProcess.ExitCode + ".");
+                var after = ReadMachineInactivity();
+                if (!after.Exists || after.Seconds != expected)
+                    throw new InvalidOperationException("Administrator broker restore did not verify the original machine inactivity value.");
+            }
+            finally
+            {
+                DisposeBrokerResources();
+            }
+        }
+        private void RunOneShotMachineInactivityHelper(uint seconds)
+        {
             string executable = Process.GetCurrentProcess().MainModule.FileName;
             try
             {
@@ -534,6 +631,24 @@ namespace WindowsNoSleep
                 throw;
             }
         }
+        private static EventWaitHandle CreateCrossUserEvent(string name)
+        {
+            var security = new EventWaitHandleSecurity();
+            var world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
+            security.AddAccessRule(new EventWaitHandleAccessRule(world, EventWaitHandleRights.FullControl, AccessControlType.Allow));
+            bool created;
+            return new EventWaitHandle(false, EventResetMode.ManualReset, name, out created, security);
+        }
+        private void CleanupExitedBroker()
+        {
+            if (_brokerProcess != null && _brokerProcess.HasExited) DisposeBrokerResources();
+        }
+        private void DisposeBrokerResources()
+        {
+            if (_brokerRestoreEvent != null) { _brokerRestoreEvent.Dispose(); _brokerRestoreEvent = null; }
+            if (_brokerReadyEvent != null) { _brokerReadyEvent.Dispose(); _brokerReadyEvent = null; }
+            if (_brokerProcess != null) { _brokerProcess.Dispose(); _brokerProcess = null; }
+        }
         internal static int RunMachineInactivityHelper(string value)
         {
             uint seconds;
@@ -548,6 +663,54 @@ namespace WindowsNoSleep
                 return after.Exists && after.Seconds == seconds ? 0 : 3;
             }
             catch { return 1; }
+        }
+        internal static int RunMachineInactivityBroker(string parentValue, string restoreName, string readyName, string originalValue)
+        {
+            int parentId;
+            uint original;
+            if (!int.TryParse(parentValue, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out parentId)
+                || !uint.TryParse(originalValue, System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out original)
+                || original == 0 || string.IsNullOrWhiteSpace(restoreName) || string.IsNullOrWhiteSpace(readyName))
+                return 64;
+
+            EventWaitHandle ready = null;
+            try
+            {
+                var platform = new WindowsScreenSaverPlatform();
+                if (!platform.IsElevated) return 5;
+                using (var restore = EventWaitHandle.OpenExisting(restoreName))
+                {
+                    ready = EventWaitHandle.OpenExisting(readyName);
+                    var before = platform.ReadMachineInactivity();
+                    if (!before.Exists || before.Seconds != original) return 6;
+                    platform.WriteMachineInactivity(0);
+                    var active = platform.ReadMachineInactivity();
+                    if (!active.Exists || active.Seconds != 0) return 3;
+                    ready.Set();
+
+                    while (true)
+                    {
+                        if (restore.WaitOne(500)) break;
+                        try
+                        {
+                            using (var parent = Process.GetProcessById(parentId))
+                                if (parent.HasExited) break;
+                        }
+                        catch (ArgumentException) { break; }
+                    }
+
+                    var current = platform.ReadMachineInactivity();
+                    if (!current.Exists) return 7;
+                    if (current.Seconds != 0 && current.Seconds != original) return 8;
+                    if (current.Seconds == 0) platform.WriteMachineInactivity(original);
+                    var after = platform.ReadMachineInactivity();
+                    return after.Exists && after.Seconds == original ? 0 : 9;
+                }
+            }
+            catch { return 1; }
+            finally { if (ready != null) ready.Dispose(); }
         }
         private void WriteMachineInactivity(uint seconds)
         {
