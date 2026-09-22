@@ -172,6 +172,12 @@ namespace WindowsNoSleep
                 catch (Exception error) { failed++; output.AppendLine("FAIL " + name + ": " + error); }
             };
             test("screensaver prevention enabled for new settings", delegate { Assert(new AppOptions().PreventScreenSaver != false); });
+            test("idle-lock checkbox is indeterminate while admin approval is pending", delegate
+            {
+                Assert(SettingsForm.ScreenSaverCheckState(true, true) == System.Windows.Forms.CheckState.Indeterminate);
+                Assert(SettingsForm.ScreenSaverCheckState(true, false) == System.Windows.Forms.CheckState.Checked);
+                Assert(SettingsForm.ScreenSaverCheckState(false, true) == System.Windows.Forms.CheckState.Unchecked);
+            });
             test("0.4 settings without field migrate to enabled", delegate
             {
                 const string old = "{\"Version\":1,\"ProtectOnBattery\":true,\"LidProtection\":true,\"DcTimeoutProtection\":true,\"BlockShutdown\":true,\"BatterySafetyPercent\":15}";

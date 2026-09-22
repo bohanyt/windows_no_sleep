@@ -28,6 +28,7 @@ namespace WindowsNoSleep
             _status = Paragraph(); _desktop = Paragraph(); _power = Paragraph(); _policy = Paragraph();
             layout.Controls.Add(_status); layout.Controls.Add(_desktop); layout.Controls.Add(_power); layout.Controls.Add(_policy);
             _screenSaver = Option("Prevent screensaver and automatic idle lock");
+            _screenSaver.ThreeState = true;
             layout.Controls.Add(_screenSaver);
             layout.Controls.Add(Paragraph("If a local machine inactivity limit is configured, Windows No Sleep requests administrator approval only for that policy change. The main app stays in your signed-in account. Domain/MDM policy may reapply it."));
             _admin = new Button { Text = "Retry administrator protection", AutoSize = true, MinimumSize = new Size(200, 30), Visible = false };
@@ -85,11 +86,16 @@ namespace WindowsNoSleep
         {
             return new CheckBox { Text = text, AutoSize = true, Margin = new Padding(0, 5, 0, 5) };
         }
+        internal static CheckState ScreenSaverCheckState(bool requested, bool needsAdministrator)
+        {
+            if (!requested) return CheckState.Unchecked;
+            return needsAdministrator ? CheckState.Indeterminate : CheckState.Checked;
+        }
         private void SaveProtectionOptions(object sender, EventArgs args)
         {
             if (_binding) return;
             var options = _context.Controller.Options.Copy();
-            options.PreventScreenSaver = _screenSaver.Checked;
+            options.PreventScreenSaver = _screenSaver.CheckState != CheckState.Unchecked;
             options.ProtectOnBattery = _onBattery.Checked;
             options.LidProtection = _lid.Checked;
             options.DcTimeoutProtection = _timeouts.Checked;
@@ -115,8 +121,10 @@ namespace WindowsNoSleep
                 _policy.Text = "Temporary settings: " + core.PolicyDetail
                     + "\nRestart guard: " + (core.GuardActive ? "Active - Windows can override it" : "Off")
                     + (_context.StartupWarning == null ? "" : "\n" + _context.StartupWarning);
-                _screenSaver.Checked = core.Options.PreventScreenSaver != false;
-                _admin.Visible = _context.NeedsAdministratorForIdleLock;
+                bool screenSaverRequested = core.Options.PreventScreenSaver != false;
+                bool needsAdministrator = screenSaverRequested && _context.NeedsAdministratorForIdleLock;
+                _screenSaver.CheckState = ScreenSaverCheckState(screenSaverRequested, needsAdministrator);
+                _admin.Visible = needsAdministrator;
                 _onBattery.Checked = core.Options.ProtectOnBattery;
                 _lid.Checked = core.Options.LidProtection;
                 _timeouts.Checked = core.Options.DcTimeoutProtection;
