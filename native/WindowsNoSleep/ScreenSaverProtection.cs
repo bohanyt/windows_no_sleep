@@ -10,6 +10,7 @@ using System.Security.Cryptography;
 using System.Security.AccessControl;
 using System.Security.Principal;
 using System.Text;
+using System.Threading;
 using Microsoft.Win32;
 
 namespace WindowsNoSleep
