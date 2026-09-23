@@ -1,5 +1,32 @@
 # PROGRESS
 
+## Current status — 2026-09-23
+
+Phase: **Native V1 final changed-path acceptance before stable**.
+
+GitHub is the source of truth. Durable successor handoff:
+
+`docs/CONTROL_TOWER_HANDOFF_20260923.md`
+
+Required sentinel:
+
+`END_OF_CONTROL_TOWER_HANDOFF key=WNS-CT-20260923-V1-046-UAC-BROKER-PENDING sections=18`
+
+Active implementation remains SAME `feat/v1-native-winforms` / DRAFT PR #4. Current orientation head `cebc01c84027e0890aa828400078c84d38bdcdf3`, binary version `0.4.6.0`. Exact-head workflow `35679569323` succeeded: core 88/88, screensaver/idle-lock 44/44. Current `dev-latest` targets that exact source head; EXE SHA-256 `94c57bf93a82f1b084583febc55093290fb49a2a9b5dc33a1d94c2fbb60a2452`.
+
+Current architecture now keeps the main app in the signed-in user and uses a bounded elevated machine-inactivity broker after one explicit UAC approval. Intended behavior: UAC Yes -> 900 -> 0 -> Protected; Stop/Exit -> broker restores 900 without a second UAC. UAC No is latched so it must not nag repeatedly; requested idle-lock protection is shown as an Indeterminate/grey tri-state checkbox until an explicit Retry or new Start attempt.
+
+Owner-observed evidence already includes native endpoint launch, basic Start/Stop/Exit, duplicate notice, AC/DC lid behavior, normal restart blocker screen, exact clean restore of machine inactivity/screensaver/SleepDc, and 0.4.3 main-user data path `C:\Users\vincentius\AppData\Local\WindowsNoSleep`. Do not require those tests again merely because 0.4.6 changed the UAC/broker/UI path.
+
+Pending physical changed-path acceptance: install 0.4.6 via existing updater; UAC No -> Degraded + grey/Indeterminate + no prompt loop; explicit Retry -> Yes -> Protected; Stop with no second UAC and verified 900 restore; Start -> Yes -> Exit with no second UAC and verified restore. Then hard-kill ONLY the non-elevated main process to prove broker auto-restore, then Start with Windows reboot/login acceptance. Stable `v1.0.0`, merge and final release labels remain blocked until this is resolved.
+
+Do not revive the PowerShell lane, create another branch, disable security, bypass UAC, fight MDM/domain policy, or ask the owner to resume ZIP/extract loops. Existing binary delivery remains `Update Windows No Sleep.cmd` -> `artifacts\local-current\WindowsNoSleep.exe`.
+
+---
+
+## Historical progress retained below
+
+
 ## Current status — 2026-09-17
 
 Phase: **P2 — EDR remediation / native compiled pilot validation**.
