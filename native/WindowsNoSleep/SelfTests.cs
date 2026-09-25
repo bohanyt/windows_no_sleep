@@ -136,7 +136,8 @@ namespace WindowsNoSleep
             internal readonly Guard Guard;
             internal readonly PolicyTransaction Transaction;
             internal readonly ProtectionController Core;
-            internal int Leases, Acquires;
+            internal int Leases, Acquires, DisplayLeases, DisplayAcquires;
+            internal bool FailDisplay;
             internal Rig(AppOptions options = null)
             {
                 Store = new Store(Trace); Policy = new Policy(Store, Trace); Guard = new Guard(Trace);
@@ -145,7 +146,13 @@ namespace WindowsNoSleep
                 {
                     Leases++; Acquires++; Trace.Add("Awake+");
                     return new Lease(delegate { Leases--; Trace.Add("Awake-"); });
-                }, Trace.Add) { PolicyRecoveryReady = true };
+                }, Trace.Add, null, delegate
+                {
+                    DisplayAcquires++;
+                    if (FailDisplay) throw new IOException("Injected display request failure");
+                    DisplayLeases++; Trace.Add("Display+");
+                    return new Lease(delegate { DisplayLeases--; Trace.Add("Display-"); });
+                }) { PolicyRecoveryReady = true };
             }
             internal IList<string> Keys { get { return new[] { PolicyKeys.LidAc, PolicyKeys.LidDc, PolicyKeys.SleepDc, PolicyKeys.HibernateDc }; } }
             internal void Apply() { Transaction.Apply(Keys); }
@@ -235,6 +242,21 @@ namespace WindowsNoSleep
         }
         private static void RegisterController()
         {
+            Add("Modern Standby AC keeps SystemRequired only", delegate { var r = new Rig(); r.Core.Start(); Assert(r.Leases == 1 && r.DisplayLeases == 0 && r.DisplayAcquires == 0 && r.Core.State == ProtectionState.Protected); r.Core.Stop(); });
+            Add("qualifying DC Start acquires display request", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); Assert(r.Leases == 1 && r.DisplayLeases == 1 && r.DisplayAcquires == 1 && r.Core.DisplayRequiredActive && r.Core.State == ProtectionState.Protected); r.Core.Stop(); });
+            Add("live AC to DC acquires display without controller restart", delegate { var r = new Rig(); r.Core.Start(); r.Sensor.Value = Laptop(80, false); r.Core.Poll(); Assert(r.DisplayAcquires == 1 && r.DisplayLeases == 1 && r.Acquires == 1 && r.Leases == 1); r.Core.Stop(); });
+            Add("repeated DC polls do not reacquire or log display request", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Trace.Clear(); r.Core.Poll(); r.Core.Poll(); Assert(r.DisplayAcquires == 1 && !r.Trace.Any(value => value.StartsWith("DISPLAY_REQUIRED_"))); r.Core.Stop(); });
+            Add("DC to AC releases display but retains SystemRequired", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Sensor.Value = Laptop(); r.Core.Poll(); Assert(r.DisplayLeases == 0 && r.Leases == 1 && r.Acquires == 1 && r.Core.State == ProtectionState.Protected && r.Trace.Contains("DISPLAY_REQUIRED_RELEASED reason=ac")); r.Core.Stop(); });
+            Add("battery without Modern Standby skips display request", delegate { var r = new Rig(); var power = Laptop(80, false); power.ModernStandby = false; r.Sensor.Value = power; r.Core.Start(); Assert(r.Leases == 1 && r.DisplayAcquires == 0 && r.Core.State == ProtectionState.Protected); r.Core.Stop(); });
+            Add("Modern Standby without battery skips display request", delegate { var r = new Rig(); var power = Laptop(80, false); power.HasBattery = false; r.Sensor.Value = power; r.Core.Start(); Assert(r.Leases == 1 && r.DisplayAcquires == 0); r.Core.Stop(); });
+            Add("disabled battery protection pauses without display request", delegate { var r = new Rig(new AppOptions { ProtectOnBattery = false }); r.Sensor.Value = Laptop(80, false); r.Core.Start(); Assert(r.Leases == 0 && r.DisplayAcquires == 0 && r.Core.State == ProtectionState.Stopped); r.Core.Stop(); });
+            Add("Battery Safety releases display request", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Sensor.Value = Laptop(15, false); r.Core.Poll(); Assert(r.DisplayLeases == 0 && r.Leases == 0 && r.Core.State == ProtectionState.BatterySafety && r.Trace.Contains("DISPLAY_REQUIRED_RELEASED reason=battery_safety")); r.Core.Stop(); });
+            Add("Stop releases display request", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Core.Stop(); Assert(r.DisplayLeases == 0 && r.Leases == 0 && r.Trace.Contains("DISPLAY_REQUIRED_RELEASED reason=stop")); });
+            Add("Suspend releases and qualifying Resume reacquires display", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Core.Suspend(); Assert(r.DisplayLeases == 0 && r.Trace.Contains("DISPLAY_REQUIRED_RELEASED reason=suspend")); r.Core.Resume(); Assert(r.DisplayLeases == 1 && r.DisplayAcquires == 2); r.Core.Stop(); });
+            Add("Resume on AC does not reacquire display", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Core.Suspend(); r.Sensor.Value = Laptop(); r.Core.Resume(); Assert(r.DisplayLeases == 0 && r.DisplayAcquires == 1 && r.Leases == 1); r.Core.Stop(); });
+            Add("crash terminal recovery releases display", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); Assert(r.Core.RecoverForCrash(null)); Assert(r.DisplayLeases == 0 && r.Leases == 0 && r.Trace.Contains("DISPLAY_REQUIRED_RELEASED reason=cleanup")); r.Core.Start(); Assert(r.DisplayAcquires == 1); });
+            Add("terminal drift cleanup releases display", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.Core.Start(); r.Policy.Values[PolicyKeys.SleepDc] = 999; r.Core.Poll(); Assert(r.DisplayLeases == 0 && r.Leases == 0 && r.Core.State == ProtectionState.Degraded && r.Trace.Contains("DISPLAY_REQUIRED_RELEASED reason=cleanup")); });
+            Add("display acquire failure degrades without retry spam or losing system request", delegate { var r = new Rig(); r.Sensor.Value = Laptop(80, false); r.FailDisplay = true; r.Core.Start(); Assert(r.Core.State == ProtectionState.Degraded && r.Core.IsAwake && r.Leases == 1 && r.DisplayLeases == 0 && r.Core.Detail.Contains("Display request unavailable")); r.Core.Poll(); r.Core.Poll(); Assert(r.DisplayAcquires == 1 && r.Trace.Count(value => value.StartsWith("DISPLAY_REQUIRED_FAILED")) == 1); r.Sensor.Value = Laptop(); r.Core.Poll(); r.Sensor.Value = Laptop(80, false); r.FailDisplay = false; r.Core.Poll(); Assert(r.DisplayAcquires == 2 && r.DisplayLeases == 1 && r.Core.State == ProtectionState.Protected); r.Core.Stop(); });
             Add("Start is idempotent", delegate { var r = new Rig(); r.Core.Start(); r.Core.Start(); r.Core.Poll(); Assert(r.Leases == 1 && r.Acquires == 1 && r.Policy.Writes == 4 && r.Core.State == ProtectionState.Protected); r.Core.Stop(); });
             Add("Stop clears blockers and restores", delegate { var r = new Rig(); r.Core.Start(); r.Core.Stop(); Assert(r.Leases == 0 && !r.Guard.IsArmed && r.Policy.Restored && !r.Store.Exists && r.Core.State == ProtectionState.Stopped); });
             Add("explicit Stop stays stopped across power changes", delegate { var r = new Rig(); r.Core.Start(); r.Core.Stop(); r.Sensor.Value = Laptop(80, false); r.Core.Poll(); r.Sensor.Value = Laptop(); r.Core.Poll(); Assert(!r.Core.Wanted && r.Leases == 0); });

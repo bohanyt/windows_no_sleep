@@ -54,7 +54,8 @@ namespace WindowsNoSleep
                 desktopPlatform, new MachineInactivityJournalStore(directory, machine, RuntimeStorage.UserId));
             _lifecycle = new ShutdownWindow(_storage.Log);
             Controller = new ProtectionController(options, platform, transaction, _lifecycle,
-                delegate { return PowerRequestLease.AcquireSystemRequired("Windows No Sleep is keeping computer workloads active while allowing the display to turn off."); }, _storage.Log, _screenSaver);
+                delegate { return PowerRequestLease.AcquireSystemRequired("Windows No Sleep is keeping computer workloads active."); }, _storage.Log, _screenSaver,
+                delegate { return PowerRequestLease.AcquireDisplayRequired("Windows No Sleep is preventing Modern Standby display idle on battery power."); });
             _recovery = new ApplicationRecoveryRegistration(Controller.RecoverForCrash);
             Controller.PolicyRecoveryReady = policyError == null && _recovery.Ready;
             Controller.PolicyRecoveryError = policyError ?? _recovery.Error;
@@ -197,6 +198,7 @@ namespace WindowsNoSleep
             var text = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Both, WordWrap = false, Dock = DockStyle.Fill };
             text.Text = "Version: " + Application.ProductVersion + "\r\nBuild: " + BuildId() + "\r\nState: " + Controller.State
                 + "\r\n" + Controller.Detail + "\r\n" + BatteryText() + "\r\nPolicy: " + Controller.PolicyDetail
+                + "\r\nModern Standby DC display request: " + (Controller.DisplayRequiredActive ? "active (display stays logically on)" : "inactive")
                 + "\r\nScreensaver: " + Controller.ScreenSaverDetail + "\r\nIdle-lock limitation: " + (Controller.ScreenSaverWarning ?? "none detected (not an exhaustive policy inventory)")
                 + "\r\nSession lock observation registered: " + _sessionEvents
                 + "\r\nRecovery pending (includes active restore snapshots): " + Controller.RecoveryPending + "\r\nARR registered: " + _recovery.Ready

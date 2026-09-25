@@ -11,9 +11,13 @@ namespace WindowsNoSleep
         private readonly PolicyTransaction _transaction;
         private readonly IShutdownGuard _guard;
         private readonly Func<IDisposable> _acquireAwake;
+        private readonly Func<IDisposable> _acquireDisplay;
         private readonly Action<string> _log;
         private readonly IScreenSaverProtection _screenSaver;
         private IDisposable _awake;
+        private IDisposable _display;
+        private string _displayWarning;
+        private bool _displayAcquireFailed;
         private bool _wanted, _batteryPaused, _suspended, _faulted;
         private volatile bool _terminal;
         private ProtectionState _steadyState;
@@ -29,6 +33,7 @@ namespace WindowsNoSleep
         internal string ScreenSaverWarning { get { return _screenSaver == null ? null : _screenSaver.Warning; } }
         internal int EffectiveThreshold { get; private set; }
         internal bool IsAwake { get { return _awake != null; } }
+        internal bool DisplayRequiredActive { get { return _display != null; } }
         internal bool Wanted { get { return _wanted; } }
         internal bool GuardActive { get { return _guard.IsArmed; } }
         internal bool RecoveryPending
@@ -36,10 +41,12 @@ namespace WindowsNoSleep
             get { try { return _transaction.Pending || (_screenSaver != null && _screenSaver.Pending); } catch { return true; } }
         }
         internal ProtectionController(AppOptions options, IPowerSensor sensor, PolicyTransaction transaction,
-            IShutdownGuard guard, Func<IDisposable> acquireAwake, Action<string> log, IScreenSaverProtection screenSaver = null)
+            IShutdownGuard guard, Func<IDisposable> acquireAwake, Action<string> log, IScreenSaverProtection screenSaver = null,
+            Func<IDisposable> acquireDisplay = null)
         {
             options.Validate(); Options = options.Copy(); _sensor = sensor; _transaction = transaction;
-            _guard = guard; _acquireAwake = acquireAwake; _log = log; _screenSaver = screenSaver;
+            _guard = guard; _acquireAwake = acquireAwake; _acquireDisplay = acquireDisplay;
+            _log = log; _screenSaver = screenSaver;
             State = ProtectionState.Starting; Detail = "Starting protection..."; PolicyDetail = "Not applied";
             EffectiveThreshold = options.BatterySafetyPercent;
         }
@@ -49,7 +56,7 @@ namespace WindowsNoSleep
             {
                 if (_terminal) return;
                 if (_wanted && _awake != null) return;
-                _wanted = true; _faulted = false;
+                _wanted = true; _faulted = false; _displayAcquireFailed = false; _displayWarning = null;
                 try { RestoreSettings(null); }
                 catch (Exception error)
                 {
@@ -74,9 +81,9 @@ namespace WindowsNoSleep
             bool batteryDisabled = Power.HasBattery && Power.OnAc != true && !Options.ProtectOnBattery;
             if (unsafeBattery || batteryDisabled)
             {
-                if (_awake != null || _guard.IsArmed || _transaction.Active || (_screenSaver != null && _screenSaver.Active))
+                if (_awake != null || _display != null || _guard.IsArmed || _transaction.Active || (_screenSaver != null && _screenSaver.Active))
                 {
-                    string cleanup = ReleaseOwned();
+                    string cleanup = ReleaseOwned(unsafeBattery ? "battery_safety" : "cleanup");
                     if (cleanup != null) { _faulted = true; PolicyDetail = "Restore pending: " + cleanup; }
                 }
                 _batteryPaused = unsafeBattery;
@@ -97,11 +104,12 @@ namespace WindowsNoSleep
                 {
                     if (_transaction.HasDrift()) throw new InvalidOperationException("Windows power settings changed outside this app.");
                     if (_screenSaver != null) _screenSaver.Poll();
+                    UpdateDisplayRequest();
                     ApplyDesktopStatus();
                 }
                 catch (Exception error)
                 {
-                    string cleanup = ReleaseOwned();
+                    string cleanup = ReleaseOwned("cleanup");
                     _wanted = false; _faulted = true;
                     SetState(ProtectionState.Degraded, error.Message + " Protection stopped rather than overriding that change. " + cleanup);
                 }
@@ -146,6 +154,7 @@ namespace WindowsNoSleep
                         }
                     }
                 }
+                UpdateDisplayRequest();
                 _steadyState = warnings.Count == 0 ? ProtectionState.Protected : ProtectionState.Degraded;
                 _steadyDetail = warnings.Count == 0 ? "Awake protection active. See screensaver / idle-lock status below."
                     : "Basic awake request active. " + string.Join(" ", warnings);
@@ -153,7 +162,7 @@ namespace WindowsNoSleep
             }
             catch (Exception error)
             {
-                string cleanup = ReleaseOwned();
+                string cleanup = ReleaseOwned("cleanup");
                 _faulted = true;
                 SetState(ProtectionState.Degraded, "Protection could not start safely. " + error.Message + " " + cleanup);
             }
@@ -161,8 +170,44 @@ namespace WindowsNoSleep
         private void ApplyDesktopStatus()
         {
             string warning = Options.PreventScreenSaver == false ? null : ScreenSaverWarning;
-            SetState(warning == null ? _steadyState : ProtectionState.Degraded,
-                _steadyDetail + (warning == null ? "" : " Screensaver / idle lock: " + warning));
+            SetState(warning == null && _displayWarning == null ? _steadyState : ProtectionState.Degraded,
+                _steadyDetail + (warning == null ? "" : " Screensaver / idle lock: " + warning)
+                + (_displayWarning == null ? "" : " " + _displayWarning));
+        }
+        private void UpdateDisplayRequest()
+        {
+            bool required = _wanted && !_suspended && !_terminal && _awake != null
+                && Power.ReadSucceeded && Power.ModernStandby && Power.HasBattery && Power.OnAc == false
+                && Options.ProtectOnBattery && !_batteryPaused;
+            if (!required)
+            {
+                ReleaseDisplay(Power.OnAc == true ? "ac" : "cleanup");
+                _displayAcquireFailed = false;
+                _displayWarning = null;
+                return;
+            }
+            if (_display != null || _displayAcquireFailed) return;
+            try
+            {
+                if (_acquireDisplay == null) throw new InvalidOperationException("Display request provider unavailable.");
+                _display = _acquireDisplay();
+                if (_display == null) throw new InvalidOperationException("Windows did not create a display request.");
+                _log("DISPLAY_REQUIRED_ACTIVE reason=modern_standby_dc");
+            }
+            catch (Exception error)
+            {
+                _displayAcquireFailed = true;
+                _displayWarning = "Display request unavailable on Modern Standby battery power: " + error.Message;
+                _log("DISPLAY_REQUIRED_FAILED reason=modern_standby_dc " + error.Message);
+            }
+        }
+        private void ReleaseDisplay(string reason)
+        {
+            if (_display == null) return;
+            var lease = _display;
+            _display = null;
+            lease.Dispose();
+            _log("DISPLAY_REQUIRED_RELEASED reason=" + reason);
         }
         private void RestoreSettings(Action pulse)
         {
@@ -180,10 +225,12 @@ namespace WindowsNoSleep
             catch (Exception error) { errors.Add(error.Message); PolicyDetail = "Restore pending: " + error.Message; }
             if (errors.Count != 0) throw new InvalidOperationException(string.Join("; ", errors));
         }
-        private string ReleaseOwned()
+        private string ReleaseOwned(string reason)
         {
             var errors = new List<string>();
             try { _guard.Set(false); } catch (Exception error) { errors.Add(error.Message); }
+            try { ReleaseDisplay(reason); } catch (Exception error) { errors.Add("Display request: " + error.Message); }
+            _displayAcquireFailed = false; _displayWarning = null;
             try { if (_awake != null) _awake.Dispose(); }
             catch (Exception error) { errors.Add(error.Message); }
             finally { _awake = null; }
@@ -196,7 +243,7 @@ namespace WindowsNoSleep
             lock (_sync)
             {
                 _wanted = false; _batteryPaused = false;
-                string error = ReleaseOwned();
+                string error = ReleaseOwned("stop");
                 if (_screenSaver != null) _screenSaver.AllowAdministratorRetry();
                 _faulted = error != null;
                 SetState(error == null ? ProtectionState.Stopped : ProtectionState.Degraded,
@@ -220,7 +267,7 @@ namespace WindowsNoSleep
             lock (_sync)
             {
                 _suspended = true;
-                string error = ReleaseOwned();
+                string error = ReleaseOwned("suspend");
                 if (error != null) _faulted = true;
                 SetState(ProtectionState.Suspended, "Windows is entering sleep; protection will be re-evaluated on resume. " + error);
             }
@@ -230,9 +277,9 @@ namespace WindowsNoSleep
             lock (_sync)
             {
                 _suspended = false;
-                if (_awake != null || _transaction.Active || (_screenSaver != null && _screenSaver.Active))
+                if (_awake != null || _display != null || _transaction.Active || (_screenSaver != null && _screenSaver.Active))
                 {
-                    string error = ReleaseOwned();
+                    string error = ReleaseOwned("cleanup");
                     if (error != null) _faulted = true;
                 }
                 EvaluateLocked();
@@ -257,6 +304,7 @@ namespace WindowsNoSleep
             try
             {
                 bool success = true;
+                try { ReleaseDisplay("cleanup"); } catch { success = false; }
                 try { if (_awake != null) _awake.Dispose(); } catch { success = false; }
                 finally { _awake = null; }
                 try { RestoreSettings(pulse); } catch { success = false; }

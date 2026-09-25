@@ -1,6 +1,6 @@
-# Windows No Sleep 0.4 — native V1 development build
+# Windows No Sleep 0.4.7 — native V1 development build
 
-Keeps computer workloads running while allowing the display to turn off. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. This is a bundled development candidate, not a claim of final physical-laptop/EDR/overnight acceptance.
+Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. This is a bundled development candidate, not a claim of final physical-laptop/EDR/overnight acceptance.
 
 ## Use the existing updater
 
@@ -10,7 +10,7 @@ A first launch starts protection in the tray. Click the tray icon for Settings. 
 
 ## Included features
 
-- Direct SystemRequired awake request. Display-on forcing is not enabled.
+- Direct SystemRequired awake request. On Modern Standby hardware with a battery, a separate transient DisplayRequired request is active only while battery protection is running on DC outside Battery Safety. It is released on AC, Stop, Suspend and cleanup. This can increase battery use with the lid open; closing the lid can still darken the physical panel.
 - Normal shutdown/restart guard with a visible Windows block reason. Forced/critical shutdown and logoff are not vetoed. This does not disable or guarantee prevention of every Windows Update restart.
 - Battery Safety: 15% base threshold, or higher when a readable Windows critical threshold plus five requires it. Unknown/critical DC battery status releases protection. A five-point hysteresis prevents rapid resume/pause cycling; AC permits resumption unless an unresolved recovery error exists.
 - Temporary lid AC/DC Do Nothing where the device has a lid and Windows permissions allow it.

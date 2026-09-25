@@ -7,20 +7,31 @@ namespace WindowsNoSleep
     internal sealed class PowerRequestLease : IDisposable
     {
         private IntPtr _handle;
-        private bool _systemRequiredSet;
+        private bool _requestSet;
+        private readonly PowerRequestType _type;
         private bool _disposed;
 
-        private PowerRequestLease(IntPtr handle)
+        private PowerRequestLease(IntPtr handle, PowerRequestType type)
         {
-            _handle = handle;
+            _handle = handle; _type = type;
         }
 
         internal bool IsActive
         {
-            get { return !_disposed && _handle != IntPtr.Zero && _systemRequiredSet; }
+            get { return !_disposed && _handle != IntPtr.Zero && _requestSet; }
         }
 
         internal static PowerRequestLease AcquireSystemRequired(string reason)
+        {
+            return Acquire(reason, PowerRequestType.SystemRequired);
+        }
+
+        internal static PowerRequestLease AcquireDisplayRequired(string reason)
+        {
+            return Acquire(reason, PowerRequestType.DisplayRequired);
+        }
+
+        private static PowerRequestLease Acquire(string reason, PowerRequestType type)
         {
             if (string.IsNullOrWhiteSpace(reason))
             {
@@ -40,15 +51,15 @@ namespace WindowsNoSleep
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "PowerCreateRequest failed.");
             }
 
-            var lease = new PowerRequestLease(handle);
+            var lease = new PowerRequestLease(handle, type);
             try
             {
-                if (!NativeMethods.PowerSetRequest(handle, PowerRequestType.SystemRequired))
+                if (!NativeMethods.PowerSetRequest(handle, type))
                 {
-                    throw new Win32Exception(Marshal.GetLastWin32Error(), "PowerSetRequest(SystemRequired) failed.");
+                    throw new Win32Exception(Marshal.GetLastWin32Error(), "PowerSetRequest(" + type + ") failed.");
                 }
 
-                lease._systemRequiredSet = true;
+                lease._requestSet = true;
                 return lease;
             }
             catch
@@ -69,10 +80,10 @@ namespace WindowsNoSleep
 
             if (_handle != IntPtr.Zero)
             {
-                if (_systemRequiredSet)
+                if (_requestSet)
                 {
-                    NativeMethods.PowerClearRequest(_handle, PowerRequestType.SystemRequired);
-                    _systemRequiredSet = false;
+                    NativeMethods.PowerClearRequest(_handle, _type);
+                    _requestSet = false;
                 }
 
                 NativeMethods.CloseHandle(_handle);
