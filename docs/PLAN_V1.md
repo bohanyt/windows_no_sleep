@@ -7,6 +7,8 @@ Canonical branch for authority docs: `main`
 
 This document is the source of truth for V1 unless a later commit on `main` explicitly supersedes it.
 
+**Current native implementation update (2026-09-25):** The approved V1 runtime is portable x64 C# WinForms on .NET Framework 4.8, on `feat/v1-native-winforms` / DRAFT PR #4. The PowerShell-first packaging text below is superseded history after Issue #3. The owner accepted focused physical gates for the exact 0.4.7.0 EXE on one endpoint; independent review and stable release remain pending. See `docs/NATIVE_RUNTIME_DECISION.md`, `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` for current scope.
+
 ---
 
 ## 1. Product goal
@@ -56,9 +58,9 @@ Display behavior is deliberately separate:
 - Windows may dim the display;
 - Windows may turn the display off;
 - monitor presence is not required;
-- `DisplayRequired` is **not** part of default protection.
+- `DisplayRequired` is absent on normal AC protection. On qualifying Modern Standby DC protection, a transient DisplayRequired request is held to prevent display-idle entry and is released on AC, Battery Safety, Stop, Suspend and cleanup.
 
-Optional advanced setting later: “Keep display on”. It is OFF by default and is not needed for V1 acceptance.
+The Modern Standby DC exception can increase battery use with the lid open. It does not alter display timeout or password-on-wake policy.
 
 ---
 
@@ -116,7 +118,7 @@ Default request:
 
 - `PowerRequestSystemRequired`
 
-Do **not** set `PowerRequestDisplayRequired` by default.
+Set `PowerRequestDisplayRequired` only for qualifying protected Modern Standby DC operation; release it on AC or safety/cleanup transitions.
 
 Reason: the computer/workload must remain active while the monitor is allowed to power down.
 
@@ -264,11 +266,11 @@ Do not overwhelm normal operators with raw GUIDs or `powercfg` details.
 
 ## 7. Packaging decision
 
-Owner preference: avoid a custom unsigned `.exe` if a simple portable non-EXE package works reliably with factory security software.
+The PowerShell-first preference below was superseded by the owner-approved native runtime decision after Issue #3. It is retained as design history, not an active packaging instruction.
 
 ### V1 implementation lane
 
-Start with a transparent source-first portable package:
+Historical first lane proposed a transparent source-first portable package:
 
 ```text
 WindowsNoSleep/
@@ -290,7 +292,7 @@ Constraints:
 
 Important compatibility gate: Windows execution policy and endpoint security can block `.ps1` files. The first local integration pass must therefore test the actual launcher on the intended endpoint. If the source-first package is blocked or materially less trustworthy than a normal binary, V1 packaging may move to a conventional portable signed/allowlisted application. The behavior contract stays the same.
 
-The project will not use suspicious tricks merely to avoid an `.exe` extension.
+The current operator updater downloads the CI-built native EXE from the explicit stable or dev release channel, verifies its staged SHA-256, then installs it to `artifacts\local-current`. The app runs as the signed-in user. A bounded elevated broker is permitted only for the explicit-UAC machine-inactivity operation and restores its exact original if the main app disappears, then exits. The utility remains unsigned; tested-endpoint acceptance is not universal EDR certification. The old PowerShell Dispatch 004 remains prohibited.
 
 ---
 
@@ -321,7 +323,7 @@ Rules:
 
 ## 9. Architecture
 
-Keep this deliberately small. Logical components, even if initially contained in one script:
+Keep this deliberately small. Current components live in the native WinForms application and its bounded broker:
 
 1. **App/Tray Host**
    - single-instance ownership;
@@ -544,15 +546,15 @@ Exit: observed workload stays alive for intended scenarios and restoration is pr
 
 ### Phase P5 — Packaging / endpoint-security gate
 
-Test the actual portable package:
+The original script packaging gate below is historical. For the current native package, verify the updater's channel selection and staged EXE checksum, then assess the exact unsigned EXE on the intended protected endpoint:
 
 - double-click launch;
 - no elevation for normal path;
-- PowerShell execution policy behavior;
+- native EXE and explicit-UAC broker behavior;
 - SentinelOne/other endpoint-security reaction where available;
 - no suspicious bypass flags or obfuscation.
 
-If the script lane is blocked, decide whether to ship a conventional signed/allowlisted portable binary rather than weakening security posture.
+Issue #3 records the blocked PowerShell lane. Signing and wider endpoint support remain release-review decisions; no security weakening is authorized.
 
 ### Phase P6 — Release candidate
 

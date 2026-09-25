@@ -1,10 +1,10 @@
 # Windows No Sleep 0.4.7 — native V1 development build
 
-Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. This is a bundled development candidate, not a claim of final physical-laptop/EDR/overnight acceptance.
+Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. The owner accepted focused physical gates for the exact 0.4.7.0 candidate on one endpoint; independent review and stable release remain pending. The unsigned build is not universally EDR certified.
 
 ## Use the existing updater
 
-Exit Windows No Sleep through its tray menu, then double-click `Update Windows No Sleep.cmd` in your existing repository folder. It downloads the CI-built executable, rather than compiling on your laptop. The executable stays at `artifacts\local-current\WindowsNoSleep.exe`. No new clone, folder reorganization or manual ZIP extraction is required.
+Exit Windows No Sleep through its tray menu, then run `Update Windows No Sleep.cmd dev` in your existing repository folder while stable publication is pending. The default updater channel is latest stable non-prerelease and does not fall back to dev. It verifies the staged EXE against `SHA256SUMS.txt` before replacing `artifacts\local-current\WindowsNoSleep.exe`. No new clone, folder reorganization or manual ZIP extraction is required.
 
 A first launch starts protection in the tray. Click the tray icon for Settings. An accidental second launch shows the existing 5-second notice without another protection owner. Close hides Settings; tray **Exit** quits and attempts verified restoration.
 
@@ -16,9 +16,10 @@ A first launch starts protection in the tray. Click the tray icon for Settings. 
 - Temporary lid AC/DC Do Nothing where the device has a lid and Windows permissions allow it.
 - Temporary DC SleepIdle Never, and HibernateIdle Never when hibernation is present. No AC sleep/display values, power-button actions, critical-battery actions, update services, or global hibernation feature settings are changed.
 - Versioned, atomically written recovery journal before each attempted power-setting write. Stop/Exit restores recorded originals and reads them back before clearing the journal.
-- ARR crash/hang recovery registration plus restore-before-protect on every normal launch. ARR is best effort. After power loss, hard termination or EDR termination, exact recorded settings can be restored only when the application runs again. Pending/corrupt/foreign/conflicting journals are preserved, not guessed or erased.
+- ARR crash/hang recovery registration plus restore-before-protect on every normal launch. ARR is best effort. After explicit UAC for the machine-inactivity override, a bounded elevated broker restores its exact original and exits if the main process disappears. Other settings after power loss, hard termination or EDR termination rely on the next-launch journal. Pending/corrupt/foreign/conflicting journals are preserved, not guessed or erased.
 - Optional **Start with Windows (after I sign in)**. Default OFF. The checkbox owns only the `WindowsNoSleep.Native` value under the current user's Run key and directly launches this EXE. No service, task, RunOnce or script recovery process.
 - Local diagnostics, state-specific tray badges, bounded event logging and a restoration receipt.
+- Session screensaver suppression and local inactivity protection where permitted; the machine-inactivity path uses explicit UAC for the bounded broker.
 
 ## Safety and data
 
@@ -26,10 +27,10 @@ Runtime data is under `%LOCALAPPDATA%\WindowsNoSleep`: `settings.json`, pending 
 
 Do not delete a pending recovery journal or change the power plan while validating apply/restore. External setting conflicts cause a safety stop and a retained journal; the app will not overwrite another actor's setting silently. If policy/permissions/ARR ownership prevent safe changes, Settings reports partial/degraded capability while retaining basic awake protection where safe.
 
-Windows security remains enabled. Stop on a security detection; no exclusion, quarantine release, forced rerun or elevation workaround. Physical closed-lid use must maintain cooling and normal critical-battery/thermal protection.
+Windows security remains enabled. Stop on a security detection; no exclusion, quarantine release, forced rerun or elevation workaround. Explicit UAC for the supported machine-inactivity operation is part of the normal feature. The old PowerShell Dispatch 004 remains prohibited. Physical closed-lid use must maintain cooling and normal critical-battery/thermal protection.
 
 ## Development evidence
 
 CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`.
 
-`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. Automatic tests do not establish physical lid/DC/overnight behavior, login-startup behavior or universal EDR acceptance. The consolidated final operator campaign is documented in `docs/NATIVE_V1_ACCEPTANCE.md` in the repository.
+`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. The owner's accepted 0.4.7.0 physical candidate had SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`. CI after packaging/docs reconciliation must prove byte identity before inheriting those physical observations. Automatic tests and one endpoint do not establish universal EDR or overnight acceptance. See `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` in the repository.

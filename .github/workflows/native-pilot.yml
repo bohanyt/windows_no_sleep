@@ -3,8 +3,6 @@ name: native-v1
 on:
   push:
     branches: [feat/v1-native-winforms]
-  pull_request:
-    branches: [main]
 
 permissions:
   contents: write
@@ -85,7 +83,7 @@ jobs:
           "$($hash.Hash)  WindowsNoSleep.exe" | Set-Content "$out\SHA256SUMS.txt" -Encoding ascii
           "$env:GITHUB_SHA" | Set-Content "$out\BUILD_SHA.txt" -Encoding ascii
           "Native V1 EXE SHA-256: $($hash.Hash)" | Add-Content $env:GITHUB_STEP_SUMMARY
-          'Signing: UNSIGNED DEVELOPMENT BUILD. Physical acceptance remains pending.' | Add-Content $env:GITHUB_STEP_SUMMARY
+          'Signing: unsigned development build. Owner physical evidence is scoped to the exact 0.4.7.0 EXE; compare this build hash before inheriting it. Independent release review remains pending.' | Add-Content $env:GITHUB_STEP_SUMMARY
 
       - name: Upload exact application artifact
         uses: actions/upload-artifact@v4
@@ -113,7 +111,7 @@ jobs:
             gh release delete dev-latest --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
             if ($LASTEXITCODE -ne 0) { throw 'Failed to replace the rolling development release.' }
           }
-          gh release create dev-latest "$out\WindowsNoSleep.exe" "$out\WindowsNoSleep.exe.config" "$out\README.txt" "$out\SHA256SUMS.txt" "$out\BUILD_SHA.txt" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'Windows No Sleep 0.4 - bundled V1 development build' --notes 'Native battery safety, normal shutdown guard, recoverable lid/DC policy, ARR/next-launch recovery and optional logon startup. Automated tests passed. Final physical endpoint acceptance is pending. Unsigned.' --prerelease --draft
+          gh release create dev-latest "$out\WindowsNoSleep.exe" "$out\WindowsNoSleep.exe.config" "$out\README.txt" "$out\SHA256SUMS.txt" "$out\BUILD_SHA.txt" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'Windows No Sleep 0.4 - bundled V1 development build' --notes 'Native V1 development build. Automated checks passed. Owner physical evidence is scoped to the exact accepted 0.4.7.0 EXE hash; compare this build hash before inheriting that evidence. Independent release review and stable decision remain pending. Unsigned.' --prerelease --draft
           if ($LASTEXITCODE -ne 0) { throw 'Failed to stage the complete release.' }
           gh release edit dev-latest --repo "$env:GITHUB_REPOSITORY" --draft=false --latest=false
           if ($LASTEXITCODE -ne 0) { throw 'Failed to publish the complete release.' }

@@ -2,15 +2,23 @@
 
 Owner direction (2026-09-21): implement all seven remaining features together and use the existing updater; no per-feature manual ZIP/extract/test loop. Recorded in Issue #1 comment 5754988623. This document replaces per-feature operator dispatch sequencing for this bundled candidate, not the safety/restore requirements.
 
+## Current acceptance record — 2026-09-25
+
+Issue #1 packet `WNS-PRESTABLE-RECONCILE-20260925-V1` accepts the owner's focused physical gates for exact native EXE version `0.4.7.0`, SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`, built from `ab1e0f1035c553e6474b2866637191d1406a9cfb` by successful workflow `36085094582` and carried by `dev-latest` release `396226381`. Accepted evidence includes Modern Standby DC idle >600 seconds without lock followed by AC DisplayRequired release; broker hard-kill restore from protected 0 to exact original 900 (`0x384`) before relaunch with broker self-exit; previously observed Start with Windows reboot/login and expected UAC (Issue #1 comment 5807529299); Stop through the live broker (5807538189); and earlier lid/restart/basic restoration observations retained in the handoff. These observations apply to the tested owner endpoint and exact candidate, not all Windows/EDR environments.
+
+The current reconciliation packet does not repeat physical tests. PR #4 remains DRAFT/unmerged. Independent review, Issue #3 endpoint-security disposition and stable release decision remain open. The unsigned native EXE is not universally EDR certified. Old PowerShell Dispatch 004 remains prohibited.
+
+The operator campaign below was the historical acceptance plan; the accepted gates above supersede its pending instructions for this packet.
+
 ## What is and is not established
 
-Owner screenshots/reports establish the earlier native UI, branded tray, Stop/Start/Exit and duplicate-notice interaction. They do not establish current native policy restoration, lid/DC/overnight operation, autostart or final EDR compatibility.
+Earlier screenshots/reports established the native UI, branded tray, Stop/Start/Exit and duplicate notice. Later focused physical evidence is recorded above. Overnight operation and universal EDR compatibility are not inferred.
 
 Before calling the bundled candidate ready for operator acceptance, its exact-head build and automated tests must finish successfully. The branch remains DRAFT PR #4. CI must never run the normal production app to simulate battery/lid policy on a random runner: `--test-suite` uses fake policy/guard providers and isolated temporary state; `--self-test` owns only a temporary SystemRequired request.
 
 ## Single operator campaign (after the complete build)
 
-Use the existing `Update Windows No Sleep.cmd` only after Exit from all older instances. It installs at the same `artifacts\local-current` path. Keep normal endpoint security enabled. No elevated app, exclusions, old PowerShell Dispatch 004, forced crash, forced reboot or unsafe battery drain.
+Before a stable release exists, use `Update Windows No Sleep.cmd dev` only after Exit from all older instances. The default updater channel is latest stable non-prerelease and does not fall back to dev. It validates the staged EXE SHA-256 before replacing `artifacts\local-current`. Keep normal endpoint security enabled. No elevated main app, exclusions, old PowerShell Dispatch 004 or unsafe battery drain.
 
 1. Open Settings from the tray and record Diagnostics build ID, battery/power source, state, enabled options, and any degraded capability. A capability error is not a pass.
 2. Start/Stop once and inspect Diagnostics plus `%LOCALAPPDATA%\WindowsNoSleep\last-restore.json`: every attempted value must have before/after evidence and `RESTORE_VERIFIED`. No pending `recovery.json` may be silently erased. This is the restoration checkpoint within the same campaign, before physical lid/DC work.
@@ -25,7 +33,7 @@ No machine shutdown, lid close or DC action is executed by the Control Tower/clo
 
 Every policy write has a durable attempted record first. Clean Stop/Exit restores exact originals and reads them back. Corrupt, foreign-account/machine or unknown-schema journals are preserved and prevent new writes. A differing external value is treated as a conflict, not blindly overwritten. Active-plan drift stops protection rather than switching the user's plan.
 
-ARR callback registration and restart registration are implemented, but Windows controls whether recovery/restart is offered. The callback has bounded lock acquisition and cancellation pings. It cannot guarantee recovery after EDR termination, a force-kill, power loss or a kernel crash; the preserved next-launch journal is the recovery path in those cases. No helper process/service is claimed to run after the app is killed. A pending journal must never be deleted merely to reset a test.
+ARR callback registration and restart registration are implemented, but Windows controls whether recovery/restart is offered. The callback has bounded lock acquisition and cancellation pings. A bounded elevated broker is approved only for the explicit-UAC machine-inactivity operation; if the main process disappears it restores the exact original and exits. Other force-kill, EDR termination, power-loss or kernel-failure recovery relies on the preserved next-launch journal, and power loss cannot execute code. A pending journal must never be deleted merely to reset a test.
 
 The native V1 supports one power-policy owner across sessions. A second live session cannot own simultaneous policy writes. Cross-account recovery of another user's abandoned journal is not automatic; use the original account/operator rather than guessing settings.
 
