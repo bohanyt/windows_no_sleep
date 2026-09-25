@@ -35,6 +35,10 @@ Every policy write has a durable attempted record first. Clean Stop/Exit restore
 
 ARR callback registration and restart registration are implemented, but Windows controls whether recovery/restart is offered. The callback has bounded lock acquisition and cancellation pings. A bounded elevated broker is approved only for the explicit-UAC machine-inactivity operation; if the main process disappears it restores the exact original and exits. Other force-kill, EDR termination, power-loss or kernel-failure recovery relies on the preserved next-launch journal, and power loss cannot execute code. A pending journal must never be deleted merely to reset a test.
 
+The local Machine inactivity override writes the machine-wide `HKLM\...\InactivityTimeoutSecs` policy and affects every signed-in user/session. If Windows No Sleep ends without its elevated broker restoring the original value (including power loss, broker termination by security software, an unclean session end, or an elevated main app with no surviving broker), machine-wide inactivity auto-lock can remain disabled across reboot for all users. The recovery record in `%LOCALAPPDATA%` is bound to the original account; another account does not automatically repair it. The same account must relaunch Windows No Sleep and approve the one-shot administrator restore helper to restore the recorded original. Start with Windows defaults to OFF, so restoration may be deferred until that account launches the app. After an abnormal main-app exit, a very rare fast process-ID reuse can defer broker restoration until the unrelated process with that ID exits or the same account relaunches and restores.
+
+Changing any protection option restarts Protection. While local machine-inactivity protection is requested, this can ask for administrator approval again, including after a previous UAC No.
+
 The native V1 supports one power-policy owner across sessions. A second live session cannot own simultaneous policy writes. Cross-account recovery of another user's abandoned journal is not automatic; use the original account/operator rather than guessing settings.
 
 ## API references and source review checklist
