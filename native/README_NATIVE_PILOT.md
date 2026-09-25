@@ -1,6 +1,6 @@
-# Windows No Sleep 0.4.7 — native V1 development build
+# Windows No Sleep 1.0.0.0 — native V1 release candidate
 
-Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. The owner accepted focused physical gates for the exact 0.4.7.0 candidate on one endpoint; independent review and stable release remain pending. The unsigned build is not universally EDR certified.
+Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. Functional native logic is unchanged from the accepted 0.4.7 lineage. This 1.0.0.0 candidate is not yet the published `v1.0.0` stable release. The unsigned build is not universally EDR certified. Issue #3 remains open.
 
 ## Use the existing updater
 
@@ -35,6 +35,6 @@ Windows security remains enabled. Stop on a security detection; no exclusion, qu
 
 ## Development evidence
 
-CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`.
+CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`. The same workflow runs for this feature branch and for `main`. Publication is refused when the branch head has moved. Packaged release text records the source SHA, Actions run ID, runner image, and MSBuild version; those fields are not embedded in the EXE.
 
-`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. The owner's accepted 0.4.7.0 physical candidate had SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`. CI after packaging/docs reconciliation must prove byte identity before inheriting those physical observations. Automatic tests and one endpoint do not establish universal EDR or overnight acceptance. See `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` in the repository.
+`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. The owner's accepted 0.4.7.0 physical candidate had SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`. That hash does not accept this 1.0.0.0 candidate. Stable `v1.0.0` will promote the exact accepted `main` artifact without rebuilding it. Automatic tests and one endpoint do not establish universal EDR or overnight acceptance. See `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` in the repository.

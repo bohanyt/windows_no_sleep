@@ -1,6 +1,16 @@
 # PROGRESS
 
-## Current status — 2026-09-25 pre-stable reconciliation
+## Current status — 2026-09-25 v1.0.0 pre-merge metadata
+
+Issue #1 packet `WNS-V1-PREMERGE-20260925-V1` follows CT release decision comment `5829142335`. SAME `feat/v1-native-winforms` / OPEN DRAFT PR #4. Starting head `deb4e04f225a61c2f4e0a85f07ca52247b3190d8`.
+
+Assembly and manifest identity are now `1.0.0.0` / `WindowsNoSleep`. This is a release candidate for unpublished stable tag `v1.0.0`. Functional native logic is unchanged from the accepted 0.4.7 lineage. Exact 0.4.7.0 physical evidence remains SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74` at `ab1e0f1035c553e6474b2866637191d1406a9cfb` and does not accept this candidate's hash.
+
+`native-v1` pushes on this feature branch and on `main`. `dev-latest` publishes only when the triggering branch still points at the run. The stable tag workflow promotes that exact successful `main` artifact and does not rebuild. Until `v1.0.0` exists, the updater still requires `dev`. Issue #3 and the machine-inactivity recovery limits remain in force. No merge, tag, or stable publication is authorized by this packet.
+
+---
+
+## Historical status — 2026-09-25 pre-stable reconciliation
 
 Issue #1 packet `WNS-PRESTABLE-RECONCILE-20260925-V1` authorizes one bounded implementation worker on the SAME `feat/v1-native-winforms` branch and OPEN/DRAFT/unmerged PR #4. Main authority and the 2026-09-21/23/25 handoffs are preserved as history. Native C# WinForms/.NET Framework 4.8 is the current V1 runtime; the PowerShell-first lane and old Dispatch 004 remain superseded/prohibited.
 
