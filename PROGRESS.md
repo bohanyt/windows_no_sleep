@@ -1,5 +1,36 @@
 # PROGRESS
 
+## Current status — 2026-09-25
+
+Phase: **Native V1 0.4.7 Modern Standby DC physical acceptance before stable**.
+
+GitHub is the source of truth. Current durable successor handoff:
+
+`docs/CONTROL_TOWER_HANDOFF_20260925.md`
+
+Required sentinel:
+
+`END_OF_CONTROL_TOWER_HANDOFF key=WNS-CT-20260925-V1-047-DC-PHYSICAL-PENDING sections=18`
+
+Active implementation remains SAME `feat/v1-native-winforms` / DRAFT PR #4 at `ab1e0f1035c553e6474b2866637191d1406a9cfb`, binary version `0.4.7.0`.
+
+Exact-head workflow `36085094582` / job `107915092623` succeeded, including Windows SDK ABI check, Release x64 build, PowerRequest self-test, regression suite, packaging and rolling publication. Current `dev-latest` release `396226381` targets that exact head. EXE SHA-256: `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`.
+
+0.4.7 corrects the owner-proven Modern Standby battery/DC lock path by adding a transient `PowerRequestDisplayRequired` only on qualifying Modern Standby DC protection. It does not mutate the display timeout, password-on-wake or a new power-plan key.
+
+Owner physical evidence already shows the exact 0.4.7 build installed, normal clean restoration, Protected state, and after unplugging:
+`DISPLAY_REQUIRED_ACTIVE reason=modern_standby_dc`.
+
+Immediate pending gate: leave the lid OPEN and input idle on DC for >600 seconds (target 11–12 minutes). PASS requires no prior lock/password recurrence. Reconnect AC afterward and verify DisplayRequired releases while normal Protection remains active.
+
+After this passes, do not restart already accepted lid/UAC/restart tests. Continue only still-unproven broker/final gates, then pre-stable packaging/docs reconciliation, independent release review, and only then any merge/stable decision.
+
+PR #4 remains OPEN/DRAFT/unmerged and currently reports a dirty conflict against main. Do not resolve that during the physical gate.
+
+---
+
+## Historical progress retained below
+
 ## Current status — 2026-09-23
 
 Phase: **Native V1 final changed-path acceptance before stable**.
