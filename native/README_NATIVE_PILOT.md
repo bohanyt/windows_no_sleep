@@ -1,10 +1,12 @@
-# Windows No Sleep 1.0.0.0 — native V1 release candidate
+# Windows No Sleep 1.0.0.0 — native V1
 
-Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. Functional native logic is unchanged from the accepted 0.4.7 lineage. This 1.0.0.0 candidate is not yet the published `v1.0.0` stable release. The unsigned build is not universally EDR certified. Issue #3 remains open.
+Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. Functional native logic is unchanged from the accepted 0.4.7 lineage. The unsigned build is not universally EDR certified. Issue #3 remains open.
 
 ## Use the existing updater
 
-Exit Windows No Sleep through its tray menu, then run `Update Windows No Sleep.cmd dev` in your existing repository folder while stable publication is pending. The default updater channel is latest stable non-prerelease and does not fall back to dev. It verifies the staged EXE against `SHA256SUMS.txt` before replacing `artifacts\local-current\WindowsNoSleep.exe`. No new clone, folder reorganization or manual ZIP extraction is required.
+Exit Windows No Sleep through its tray menu before updating. Before stable `v1.0.0` is published, run `Update Windows No Sleep.cmd dev` to obtain the rolling release-candidate artifact. After stable publication, running `Update Windows No Sleep.cmd` with no argument uses GitHub's latest stable non-prerelease release. The stable release promotes the exact accepted `main` CI package bytes rather than rebuilding them, so the promoted package is the same artifact that was accepted before tagging. The updater never silently falls back from stable to dev.
+
+The updater verifies the staged EXE against `SHA256SUMS.txt` before replacing `artifacts\local-current\WindowsNoSleep.exe`. No new clone, folder reorganization or manual ZIP extraction is required.
 
 A first launch starts protection in the tray. Click the tray icon for Settings. An accidental second launch shows the existing 5-second notice without another protection owner. Close hides Settings; tray **Exit** quits and attempts verified restoration.
 
@@ -33,8 +35,8 @@ Do not delete a pending recovery journal or change the power plan while validati
 
 Windows security remains enabled. Stop on a security detection; no exclusion, quarantine release, forced rerun or elevation workaround. Explicit UAC for the supported machine-inactivity operation is part of the normal feature. The old PowerShell Dispatch 004 remains prohibited. Physical closed-lid use must maintain cooling and normal critical-battery/thermal protection.
 
-## Development evidence
+## Build and release evidence
 
-CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`. The same workflow runs for this feature branch and for `main`. Publication is refused when the branch head has moved. Packaged release text records the source SHA, Actions run ID, runner image, and MSBuild version; those fields are not embedded in the EXE.
+CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`. The same workflow runs for the feature branch and for `main`. Publication is refused when the branch head has moved. Packaged release text records the source SHA, Actions run ID, runner image, and MSBuild version; those fields are not embedded in the EXE.
 
-`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. The owner's accepted 0.4.7.0 physical candidate had SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`. That hash does not accept this 1.0.0.0 candidate. Stable `v1.0.0` will promote the exact accepted `main` artifact without rebuilding it. Automatic tests and one endpoint do not establish universal EDR or overnight acceptance. See `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` in the repository.
+`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. The owner's accepted 0.4.7.0 physical candidate had SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`. That historical hash does not establish exact-artifact acceptance for a 1.0.0.0 build. Stable `v1.0.0` is published only by promoting the exact accepted `main` artifact without rebuilding it. Automatic tests and one endpoint do not establish universal EDR or overnight acceptance. See `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` in the repository.
