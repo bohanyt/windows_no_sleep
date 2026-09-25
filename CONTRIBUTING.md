@@ -1,27 +1,23 @@
-# Contributing to Windows No Sleep
+# Contributing
 
-Thanks for helping improve the project. Start with the [user guide](docs/USAGE.md), [safety contract](docs/SAFETY.md), and [current project status](docs/CURRENT.md).
+Thanks for helping improve Windows No Sleep. Start with the [user guide](docs/USAGE.md) and [safety information](docs/SAFETY.md).
 
 ## Report a problem
 
-Use [GitHub Issues](https://github.com/bohanyt/windows_no_sleep/issues). Include the app version and build SHA, Windows version, what you expected, what happened, and a short reproduction. For power-related problems, also describe AC versus battery, lid position, relevant settings, and the status shown in Settings or Diagnostics.
+Open a [GitHub issue](https://github.com/bohanyt/windows_no_sleep/issues) with the app version, Windows version, what happened, what you expected, and steps to reproduce it. For power-related problems, include AC versus battery, lid position, relevant settings, and the status shown in Diagnostics. The build identifier can help distinguish otherwise similar builds.
 
-Share only the relevant log excerpt. Remove usernames, machine names, private paths, and unrelated information. Do not post credentials or complete private diagnostic archives. Do not delete local recovery records while preparing a report.
+Share only relevant log excerpts. Remove usernames, machine names, private paths, and unrelated information. Never post credentials or delete pending recovery records to prepare a report.
 
-For a security-software detection, stop using the affected package and report the exact release, EXE hash, and detection details. Do not disable protection, restore quarantined files for a forced rerun, or add exclusions as a workaround.
+For a security-software detection, stop using the affected package and report its version, checksum, and detection details. Do not disable protection, add exclusions, or force a quarantined file to run.
 
 ## Propose a change
 
-Keep changes focused. Discuss new features or power/recovery behavior before implementing them, so they do not conflict with another active task. Separate documentation cleanup from runtime changes. Describe the problem, scope, tests actually run, and any limitations in the pull request.
+Keep pull requests focused. Discuss new features and power/recovery changes before implementation. Describe the problem, scope, tests actually run, and remaining limitations. See [Building and testing](docs/DEVELOPMENT.md).
 
-A Windows build is not proof of physical lid, battery, Modern Standby, recovery, or endpoint-security behavior. Use [the development guide](docs/DEVELOPMENT.md) and record evidence accurately. Never run power-setting mutation tests on someone else's machine without explicit permission and a restoration plan.
+Preserve exact-original restoration and unresolved recovery records. Do not disable Windows Update, global hibernation, antivirus/EDR, critical-battery actions, or thermal protection. Never run power-setting mutation tests on someone else's machine without permission and a restoration plan.
 
-## Non-negotiable safeguards
-
-Do not disable Windows Update services, global hibernation, antivirus/EDR, critical-battery actions, or thermal protection. Do not add input simulation or permanent policy changes to work around a failed capability. Preserve exact-original restoration and unresolved recovery evidence.
-
-Do not repackage an existing executable under a new version, overwrite a published release, or imply that unsigned builds are universally security-certified. Release decisions remain with the owner.
+A compile or simulated test is not proof of physical lid, battery, standby, or endpoint-security behavior. Do not relabel an old executable as a new version. Release decisions remain with the maintainer.
 
 ## Licensing
 
-No project-wide root `LICENSE` is currently declared. `legacy/LICENSE` belongs to the historical third-party material. This documentation cleanup does not select a new license or expand that legacy license to the native app. Confirm licensing with the owner before incorporating third-party code or assets.
+No project-wide license is currently declared. This cleanup does not grant a new license. Contact the maintainer about reuse or licensing before incorporating third-party code or assets.

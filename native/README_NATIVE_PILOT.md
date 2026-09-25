@@ -1,42 +1,45 @@
-# Windows No Sleep 1.0.0.0 — native V1
+# Windows No Sleep
 
-Keeps computer workloads running. On Modern Standby laptops while protected on battery, it also keeps the display logically on to prevent display-idle Modern Standby entry. Portable x64 C# WinForms application for .NET Framework 4.8, running as the current user. Functional native logic is unchanged from the accepted 0.4.7 lineage. The unsigned build is not universally EDR certified. Issue #3 remains open.
+Portable tray utility for Windows x64 with .NET Framework 4.8. Keeps workloads running with temporary settings that are restored when protection stops.
 
-## Use the existing updater
+User guide: https://github.com/bohanyt/windows_no_sleep/blob/main/docs/USAGE.md
+Safety and recovery: https://github.com/bohanyt/windows_no_sleep/blob/main/docs/SAFETY.md
 
-Exit Windows No Sleep through its tray menu before updating. Before stable `v1.0.0` is published, run `Update Windows No Sleep.cmd dev` to obtain the rolling release-candidate artifact. After stable publication, running `Update Windows No Sleep.cmd` with no argument uses GitHub's latest stable non-prerelease release. The stable release promotes the exact accepted `main` CI package bytes rather than rebuilding them, so the promoted package is the same artifact that was accepted before tagging. The updater never silently falls back from stable to dev.
+## Run
 
-The updater verifies the staged EXE against `SHA256SUMS.txt` before replacing `artifacts\local-current\WindowsNoSleep.exe`. No new clone, folder reorganization or manual ZIP extraction is required.
+Keep WindowsNoSleep.exe and WindowsNoSleep.exe.config together. Verify the EXE against SHA256SUMS.txt, then launch it. The text files provide instructions, checksum verification, and build identification; they are not additional programs to install.
 
-A first launch starts protection in the tray. Click the tray icon for Settings. An accidental second launch shows the existing 5-second notice without another protection owner. Close hides Settings; tray **Exit** quits and attempts verified restoration.
+Protection starts in the tray. Click the icon for Settings. Closing Settings leaves the app running. Use Stop Protection to release protection, or tray Exit to quit and restore temporary settings. A duplicate launch shows a short notice rather than starting another protection owner.
 
-## Included features
+Start with Windows is optional and OFF by default. Choose a permanent executable location before enabling it. Startup happens after the current user signs in; privileged inactivity protection may still request administrator approval.
 
-- Direct SystemRequired awake request. On Modern Standby hardware with a battery, a separate transient DisplayRequired request is active only while battery protection is running on DC outside Battery Safety. It is released on AC, Stop, Suspend and cleanup. This can increase battery use with the lid open; closing the lid can still darken the physical panel.
-- Normal shutdown/restart guard with a visible Windows block reason. Forced/critical shutdown and logoff are not vetoed. This does not disable or guarantee prevention of every Windows Update restart.
-- Battery Safety: 15% base threshold, or higher when a readable Windows critical threshold plus five requires it. Unknown/critical DC battery status releases protection. A five-point hysteresis prevents rapid resume/pause cycling; AC permits resumption unless an unresolved recovery error exists.
-- Temporary lid AC/DC Do Nothing where the device has a lid and Windows permissions allow it.
-- Temporary DC SleepIdle Never, and HibernateIdle Never when hibernation is present. No AC sleep/display values, power-button actions, critical-battery actions, update services, or global hibernation feature settings are changed.
-- Versioned, atomically written recovery journal before each attempted power-setting write. Stop/Exit restores recorded originals and reads them back before clearing the journal.
-- ARR crash/hang recovery registration plus restore-before-protect on every normal launch. ARR is best effort. After explicit UAC for the machine-inactivity override, a bounded elevated broker restores its exact original and exits if the main process disappears. Other settings after power loss, hard termination or EDR termination rely on the next-launch journal. Pending/corrupt/foreign/conflicting journals are preserved, not guessed or erased.
-- Optional **Start with Windows (after I sign in)**. Default OFF. The checkbox owns only the `WindowsNoSleep.Native` value under the current user's Run key and directly launches this EXE. No service, task, RunOnce or script recovery process.
-- Local diagnostics, state-specific tray badges, bounded event logging and a restoration receipt.
-- Session screensaver suppression and local inactivity protection where permitted; the machine-inactivity path uses explicit UAC for the bounded broker.
+## Update
 
-The local Machine inactivity override writes the machine-wide `HKLM\...\InactivityTimeoutSecs` policy and affects every signed-in user/session. If Windows No Sleep ends without its elevated broker restoring the original value (for example, power loss, broker termination by security software, an unclean session end, or an elevated main app with no surviving broker), machine-wide inactivity auto-lock can remain disabled across reboot for all users. The recovery record is bound to the original account in `%LOCALAPPDATA%`; another account does not automatically repair it. The same account must relaunch Windows No Sleep and approve the one-shot administrator restore helper to restore the recorded original. Start with Windows defaults to OFF, so this recovery may not happen until that account launches the app. After an abnormal main-app exit, a very rare fast process-ID reuse can defer broker restoration until the unrelated process with that ID exits or the same account relaunches and restores.
+Exit the app normally first. In a repository checkout, run Update Windows No Sleep.cmd with no argument for the latest stable release. The updater checks the EXE checksum and uses artifacts\local-current. Development builds require an explicit dev argument; there is no silent fallback.
 
-Changing any protection option restarts Protection. While local machine-inactivity protection is requested, this can ask for administrator approval again, including after a previous UAC No.
+For manual installations, download the files from the latest stable release and verify the EXE checksum before launching the replacement:
+https://github.com/bohanyt/windows_no_sleep/releases/latest
 
-## Safety and data
+## Important limitations
 
-Runtime data is under `%LOCALAPPDATA%\WindowsNoSleep`: `settings.json`, pending `recovery.json`, `last-restore.json`, `events.log` and an ownership lock. The updater does not delete this data.
+- Modern Standby battery protection can keep the display logically on, increasing battery use. On AC, the display may turn off normally. Keep closed-lid laptops ventilated.
+- Battery Safety releases protection at low, critical, or unreadable DC battery conditions. Its base threshold is 15%, raised when a readable Windows critical threshold plus five requires it. Five-point hysteresis prevents rapid pause/resume cycling.
+- Supported temporary power changes are limited to lid action AC/DC and sleep/hibernate timeouts on DC. Windows Update services, global hibernation, power-button actions, critical-battery actions, and thermal protection are not disabled.
+- The normal shutdown/restart guard cannot guarantee protection against forced shutdown, logoff, power loss, or every Windows Update deadline. Save work normally.
 
-Do not delete a pending recovery journal or change the power plan while validating apply/restore. External setting conflicts cause a safety stop and a retained journal; the app will not overwrite another actor's setting silently. If policy/permissions/ARR ownership prevent safe changes, Settings reports partial/degraded capability while retaining basic awake protection where safe.
+## Machine-wide automatic-lock warning
 
-Windows security remains enabled. Stop on a security detection; no exclusion, quarantine release, forced rerun or elevation workaround. Explicit UAC for the supported machine-inactivity operation is part of the normal feature. The old PowerShell Dispatch 004 remains prohibited. Physical closed-lid use must maintain cooling and normal critical-battery/thermal protection.
+The optional machine-inactivity override changes InactivityTimeoutSecs for ALL signed-in users/sessions. Use it only where you are authorized to change automatic-lock behavior. After explicit UAC approval, an elevated broker is intended to restore the exact original value on Stop/Exit or when the main app disappears.
 
-## Build and release evidence
+Power loss, security software terminating the broker, an unclean session end, or an elevated main app without a surviving broker can leave automatic locking disabled across reboot for all users. The recovery record belongs to the original account in %LOCALAPPDATA%; another account does not automatically repair it. The original account must relaunch Windows No Sleep and approve the administrator restore helper. Startup is OFF by default, so this may wait until that account launches the app.
 
-CI compiles the exact native EXE, checks managed ABI offsets against the Windows SDK, runs the real non-mutating power-request self-test, and runs fake-provider battery/transaction/controller/storage/ownership regression tests before publishing `dev-latest`. The same workflow runs for the feature branch and for `main`. Publication is refused when the branch head has moved. Packaged release text records the source SHA, Actions run ID, runner image, and MSBuild version; those fields are not embedded in the EXE.
+Rare fast process-ID reuse can delay broker restoration until that unrelated process exits or the original account relaunches and restores. Changing protection options restarts protection and may request UAC again, including after a previous denial.
 
-`BUILD_SHA.txt` identifies the source build; `SHA256SUMS.txt` records its EXE SHA-256. The owner's accepted 0.4.7.0 physical candidate had SHA-256 `7a62745e408792a0c1c3d4e863e0f46a3af7fc9c18e53b567d0be87fbd397e74`. That historical hash does not establish exact-artifact acceptance for a 1.0.0.0 build. Stable `v1.0.0` is published only by promoting the exact accepted `main` artifact without rebuilding it. Automatic tests and one endpoint do not establish universal EDR or overnight acceptance. See `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md` in the repository.
+## Recovery and security
+
+Settings and diagnostics live under %LOCALAPPDATA%\WindowsNoSleep. Do not delete pending recovery records to clear an error. The app refuses new policy writes while restoration is unresolved. After an abnormal exit, settings not restored by a surviving broker rely on next-launch recovery. Crash/hang recovery is best effort, not guaranteed. Follow the reported recovery action; never guess original values.
+
+The release is unsigned. A matching checksum verifies EXE integrity, not a digital signature or universal antivirus/EDR approval. Stop on a security detection; do not disable security software, add exclusions, or force quarantined files to run.
+
+Report problems with the app version, relevant settings, and redacted diagnostic excerpts:
+https://github.com/bohanyt/windows_no_sleep/issues
