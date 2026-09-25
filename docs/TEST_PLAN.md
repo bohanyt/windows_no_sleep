@@ -5,6 +5,8 @@ Date: 2026-09-14
 
 This plan exists because the project is small, but its failure modes can affect real Windows power behavior. A test is not successful unless restoration is also proven.
 
+**Current native validation (2026-09-25):** V1 uses C# WinForms/.NET Framework 4.8 on `feat/v1-native-winforms` / DRAFT PR #4. CI checks the SDK ABI, Release x64 build, non-mutating power-request self-test and fake-provider regression suite. The owner accepted focused 0.4.7.0 physical gates on one endpoint, including Modern Standby DC >600 seconds without lock, AC DisplayRequired release, exact broker hard-kill restore, previously observed startup/reboot with UAC and live-broker Stop restore. Do not repeat those physical gates for the pre-stable reconciliation packet. Independent review and stable release remain pending; see `docs/NATIVE_V1_ACCEPTANCE.md` and `PROGRESS.md`.
+
 ---
 
 ## 1. Test principles
@@ -51,7 +53,7 @@ No Windows state mutation.
 
 Prove:
 
-- script parses/loads;
+- native project builds and ABI assertions pass;
 - configuration defaults are deterministic;
 - state transitions are idempotent;
 - recovery JSON serialization/deserialization works;
@@ -86,14 +88,14 @@ Prove:
 
 - `PowerCreateRequest` succeeds;
 - `PowerRequestSystemRequired` is set;
-- default path does not set `DisplayRequired`;
+- AC/default path does not set `DisplayRequired`, while qualifying protected Modern Standby DC holds it transiently and releases it on AC/safety/cleanup;
 - request is visible in `powercfg /requests` when observed from an elevated terminal where required;
 - Stop Protection clears request;
 - clean Exit clears request;
 - force-closing the process does not leave a permanent request behind;
 - restart of the app can recover to a clean state.
 
-Expected display behavior: monitor is still allowed to time out.
+Expected display behavior: AC monitor timeout remains allowed; qualifying Modern Standby DC keeps the display logically on during protection.
 
 ### T3 — Shutdown/restart blocker lifecycle
 
@@ -277,16 +279,15 @@ When testing enabled state:
 
 ### T13 — Packaging / EDR
 
-Local endpoint test required for final packaging decision.
+The old PowerShell package test steps below are historical. For current native packaging, the updater defaults to GitHub's latest stable non-prerelease release and selects `dev-latest` only with `dev` or `--dev`. It must reject missing/malformed/mismatched `SHA256SUMS.txt` before replacing `artifacts\local-current`. The stable tag workflow must check the exact tagged main SHA, version metadata and all native CI/package gates before publishing five assets. No stable release has been authorized yet.
 
 Prove actual operator path:
 
-1. copy/download release folder;
-2. double-click launch file;
-3. observe PowerShell execution policy behavior;
-4. observe SentinelOne/other EDR reaction where available;
-5. verify there is no encoded command, obfuscation, or persistent policy bypass;
-6. record whether the package is usable without local admin.
+1. install the exact native release assets through the existing updater with the selected channel;
+2. verify the recorded EXE SHA-256 and `BUILD_SHA.txt` against the candidate;
+3. observe normal launch and endpoint security reaction on the intended device;
+4. verify there is no encoded command, obfuscation, persistent policy bypass or unapproved helper;
+5. record whether the package is usable as the normal signed-in user, with explicit UAC only for machine inactivity protection.
 
 If blocked by organizational policy, stop. Do not add evasion behavior. Escalate packaging decision to Control Tower.
 

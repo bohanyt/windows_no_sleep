@@ -8,6 +8,8 @@ Local Windows executor: Cursor agent on the physical Windows 11 test laptop, **o
 
 GitHub is the source of truth. Chat memory is convenience only.
 
+Current orientation (2026-09-25): native C# WinForms/.NET Framework 4.8 is the V1 runtime. The single implementation lane is `feat/v1-native-winforms` / OPEN DRAFT PR #4. Issue #1 packet `WNS-PRESTABLE-RECONCILE-20260925-V1` authorizes only a bounded merge/updater/workflow/docs reconciliation after owner acceptance of the exact 0.4.7.0 tested-endpoint physical gates. Independent review and stable release decision remain pending. The old PowerShell Dispatch 004 is prohibited; Issue #3/EDR history remains open and unsigned endpoint acceptance is not universal certification.
+
 ---
 
 ## 1. Read order for every new Control Tower chat
@@ -18,9 +20,10 @@ A successor Control Tower must fresh-read, in this order:
 2. `docs/PLAN_V1.md`
 3. `docs/TEST_PLAN.md`
 4. `docs/CONTROL_TOWER.md`
-5. `PROGRESS.md`
-6. the current master Control Tower GitHub issue and its latest comments, if one exists
-7. current implementation PR/branch only if `PROGRESS.md` says implementation has begun
+5. `docs/NATIVE_RUNTIME_DECISION.md`
+6. `PROGRESS.md`
+7. the latest handoff and current master Control Tower issue comments
+8. current implementation PR/branch, exact-head CI and release identity
 
 Do not continue from remembered chat state without checking GitHub.
 
@@ -70,7 +73,7 @@ Use additional agents only for clearly disjoint work that cannot collide. Never 
 Implementation:
 
 - use one feature branch for the current V1 implementation;
-- preferred branch name: `feat/v1-portable-tray`;
+- current branch: `feat/v1-native-winforms` / DRAFT PR #4;
 - do not create parallel competing implementation branches unless the Control Tower explicitly records why.
 
 A local executor must fresh-pull/fetch before work and must report the exact starting commit SHA.
@@ -180,7 +183,7 @@ A successor should be able to reconstruct current state from GitHub without old 
 
 ---
 
-## 9. Current phase at establishment
+## 9. Historical phase at establishment
 
 Current phase: **P0 — Authority and plan**.
 
