@@ -1,0 +1,158 @@
+name: native-v1
+
+on:
+  push:
+    branches:
+      - feat/v1-native-winforms
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: native-v1-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-self-test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Check native ABI against Windows SDK
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Path .\artifacts -Force | Out-Null
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installation = & $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $installation) { throw 'Windows SDK C++ tools were not found.' }
+          $dev = Join-Path $installation 'Common7\Tools\VsDevCmd.bat'
+          $command = 'call "{0}" -arch=x64 -host_arch=x64 >nul && cl /nologo /EHsc /c native\tests\AbiCheck.cpp /Fo:artifacts\AbiCheck.obj' -f $dev
+          & $env:ComSpec /d /s /c $command
+          if ($LASTEXITCODE -ne 0) { throw 'Native ABI assertions failed.' }
+
+      - name: Build native Release x64
+        shell: powershell
+        run: |
+          msbuild .\native\WindowsNoSleep\WindowsNoSleep.csproj /m /t:Rebuild /p:Configuration=Release /p:Platform=x64
+          if ($LASTEXITCODE -ne 0) { throw 'Native build failed.' }
+
+      - name: Run non-mutating native power request self-test
+        shell: powershell
+        run: |
+          $exe = Resolve-Path .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe
+          $process = Start-Process -FilePath $exe -ArgumentList '--self-test' -PassThru
+          if (-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Self-test timed out.' }
+          $process.Refresh()
+          if ($process.ExitCode -ne 0) { throw "Native power-request test failed: $($process.ExitCode)" }
+          Write-Host 'NATIVE_POWER_REQUEST_SELF_TEST_PASS'
+
+      - name: Run battery recovery and controller regression suite
+        shell: powershell
+        run: |
+          $exe = Resolve-Path .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe
+          $report = Join-Path (Resolve-Path .\artifacts) 'native-v1-tests.txt'
+          $arguments = '--test-suite "{0}"' -f $report
+          $process = Start-Process -FilePath $exe -ArgumentList $arguments -PassThru
+          if (-not $process.WaitForExit(120000)) { $process.Kill(); throw 'Regression suite timed out.' }
+          $process.Refresh()
+          if (Test-Path $report) { Get-Content $report }
+          if ($process.ExitCode -ne 0) { throw "Native regression suite failed: $($process.ExitCode)" }
+          if (-not (Test-Path $report)) { throw 'Regression suite did not produce evidence.' }
+
+      - name: Upload regression evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-v1-test-evidence
+          path: artifacts/native-v1-tests.txt
+          if-no-files-found: ignore
+
+      - name: Package native V1 and record SHA-256
+        shell: powershell
+        run: |
+          $out = '.\artifacts\native-pilot'
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          Copy-Item .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe $out
+          Copy-Item .\native\WindowsNoSleep\bin\Release\WindowsNoSleep.exe.config $out
+          Copy-Item .\native\README_NATIVE_PILOT.md "$out\README.txt"
+          $msbuildLines = @(& msbuild -nologo -version | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+          if ($LASTEXITCODE -ne 0 -or $msbuildLines.Count -lt 1) { throw 'MSBuild version unavailable.' }
+          $msbuildVersion = $msbuildLines -join ' | '
+          $runnerOs = if ($env:RUNNER_OS) { $env:RUNNER_OS } else { 'unavailable' }
+          $imageOs = if ($env:ImageOS) { $env:ImageOS } else { 'unavailable' }
+          $imageVersion = if ($env:ImageVersion) { $env:ImageVersion } else { 'unavailable' }
+          $provenance = @(
+            ''
+            '## Build Provenance'
+            ''
+            "- Source SHA: $env:GITHUB_SHA"
+            "- Actions run ID: $env:GITHUB_RUN_ID"
+            "- Runner image: $runnerOs / $imageOs / $imageVersion"
+            "- MSBuild version: $msbuildVersion"
+            ''
+          ) -join "`n"
+          $readmePath = (Resolve-Path "$out\README.txt").Path
+          [System.IO.File]::AppendAllText($readmePath, $provenance)
+          $hash = Get-FileHash "$out\WindowsNoSleep.exe" -Algorithm SHA256
+          "$($hash.Hash)  WindowsNoSleep.exe" | Set-Content "$out\SHA256SUMS.txt" -Encoding ascii
+          "$env:GITHUB_SHA" | Set-Content "$out\BUILD_SHA.txt" -Encoding ascii
+          @(
+            "Native V1 EXE SHA-256: $($hash.Hash)"
+            'Build provenance (package text only):'
+            "- Source SHA: $env:GITHUB_SHA"
+            "- Actions run ID: $env:GITHUB_RUN_ID"
+            "- Runner image: $runnerOs / $imageOs / $imageVersion"
+            "- MSBuild version: $msbuildVersion"
+            'Signing: unsigned 1.0.0.0 release candidate. Functional logic follows the accepted 0.4.7 lineage. Exact-hash physical acceptance does not transfer to this candidate.'
+          ) | Add-Content $env:GITHUB_STEP_SUMMARY
+          @(
+            "Source SHA: $env:GITHUB_SHA"
+            "Actions run ID: $env:GITHUB_RUN_ID"
+            "Runner image: $runnerOs / $imageOs / $imageVersion"
+            "MSBuild version: $msbuildVersion"
+            "EXE SHA-256: $($hash.Hash)"
+          ) | Set-Content .\artifacts\dev-release-notes.txt -Encoding ascii
+
+      - name: Upload exact application artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WindowsNoSleep-native-pilot
+          path: artifacts/native-pilot
+          if-no-files-found: error
+
+      - name: Publish compatible rolling dev build after all checks
+        if: github.event_name == 'push'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ($env:GITHUB_REF_TYPE -ne 'branch') { throw 'Development publication requires a branch push.' }
+          $branch = $env:GITHUB_REF_NAME
+          $allowed = @('feat/v1-native-winforms', 'main')
+          if ($allowed -notcontains $branch) { throw 'Refusing publication from an unsupported branch.' }
+          $current = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/$branch" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($current)) { throw 'Unable to verify the current branch head.' }
+          if ($current.Trim() -ne $env:GITHUB_SHA) { Write-Host 'Branch head no longer matches this run; refusing stale publication.'; exit 0 }
+          $out = '.\artifacts\native-pilot'
+          $previousErrorPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          gh release view dev-latest --repo "$env:GITHUB_REPOSITORY" 2>$null | Out-Null
+          $exists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $previousErrorPreference
+          if ($exists) {
+            gh release delete dev-latest --repo "$env:GITHUB_REPOSITORY" --yes --cleanup-tag
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to replace the rolling development release.' }
+          }
+          $notesPath = '.\artifacts\dev-release-notes.txt'
+          if (-not (Test-Path $notesPath)) { throw 'Development release notes are missing.' }
+          $notes = ((Get-Content $notesPath -Raw).Trim() + "`n`nNative V1 1.0.0.0 release candidate. Automated checks passed. Functional logic is unchanged from the accepted 0.4.7 lineage. This hash is not yet exact-artifact physical acceptance. Stable v1.0.0 is not published. Unsigned.")
+          gh release create dev-latest "$out\WindowsNoSleep.exe" "$out\WindowsNoSleep.exe.config" "$out\README.txt" "$out\SHA256SUMS.txt" "$out\BUILD_SHA.txt" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'Windows No Sleep 1.0.0.0 release candidate' --notes $notes --prerelease --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to stage the complete release.' }
+          gh release edit dev-latest --repo "$env:GITHUB_REPOSITORY" --draft=false --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Failed to publish the complete release.' }
