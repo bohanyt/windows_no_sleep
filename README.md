@@ -4,44 +4,37 @@
 
 # Windows No Sleep
 
-**Keep your Windows workloads running, with temporary settings that restore when you stop.**
+**Keep your Windows workloads running. Stop when you are done. Restore your settings.**
 
-A portable tray utility for long-running tasks, remote sessions, and supported closed-lid setups. Built with C# and WinForms for Windows x64 and .NET Framework 4.8.
+A portable tray utility for long-running tasks, remote sessions, and supported closed-lid setups. Windows x64 · .NET Framework 4.8 · No installer.
 
-**[Download the latest stable release](https://github.com/bohanyt/windows_no_sleep/releases/latest)** · [User guide](docs/USAGE.md) · [Safety and recovery](docs/SAFETY.md) · [Changelog](CHANGELOG.md)
+## Download
 
-## Get started
+**[Download the latest stable release](https://github.com/bohanyt/windows_no_sleep/releases/latest)**
 
-1. Open the **latest stable release** above. Download `WindowsNoSleep.exe` and `WindowsNoSleep.exe.config` into the same folder. Also keep `README.txt`, `SHA256SUMS.txt`, and `BUILD_SHA.txt` for instructions and build verification.
-2. Follow the [checksum instructions](docs/USAGE.md#verify-a-download), then launch `WindowsNoSleep.exe`. Protection starts in the notification area; some optional protection may request administrator approval.
-3. Click the tray icon to open Settings. Closing Settings leaves the app running. Use **Stop** to release protection, or right-click the tray icon and choose **Exit** to quit and restore temporary settings.
+Download **`WindowsNoSleep.exe`** and **`WindowsNoSleep.exe.config`** into the same folder. You do not need to clone this repository or download the Source code archives to use the app. The release also includes a checksum file for [verifying your download](docs/USAGE.md#verify-a-download).
 
-No installer or local build tools are required to use the release. **Start with Windows** is optional and off by default.
+Launch the EXE to start protection in the notification area. Click its tray icon for Settings. Closing Settings leaves the app running; use **Stop Protection** or tray **Exit** to release protection and restore temporary settings. **Start with Windows** is optional and off by default.
 
-Already using a repository checkout? Exit the app, then double-click **`Update Windows No Sleep.cmd`**. It downloads the latest stable build, checks the EXE checksum, and launches it from `artifacts\local-current`. Development builds require an explicit `dev` argument; the updater does not silently switch channels.
+Already using a repository checkout? Exit the app, then double-click **`Update Windows No Sleep.cmd`** to download and verify the latest stable build.
 
-## What it does
+## Features
 
-| Capability | What to expect |
-| --- | --- |
-| Keep workloads awake | Requests that Windows keep the system running. Display-off is normally allowed, with a Modern Standby battery exception below. |
-| Lid and battery protection | Temporarily adjusts supported lid and battery sleep/hibernate settings where Windows permits it. |
-| Battery Safety | Releases protection at low, critical, or unreadable battery conditions on DC rather than keeping the machine awake at any cost. |
-| Shutdown/restart guard | Shows a block reason for supported normal shutdown/restart requests; it cannot guarantee prevention of forced shutdowns or every update deadline. |
-| Restore and recover | Records original settings before changing them, verifies restoration, and preserves unresolved recovery data. |
+- Keep workloads awake, with temporary lid and battery sleep/hibernate settings where supported.
+- Battery Safety pauses protection when battery conditions are low, critical, or unreadable.
+- A guard for supported normal shutdown/restart requests, plus recovery records for temporary settings.
+- Settings, diagnostics, and optional startup after sign-in, all from the tray.
 
-## Know before you use it
+## Important limitations
 
-**On Modern Standby laptops, active battery protection can keep the display logically on.** This avoids the display-idle standby path, but can increase battery use. On AC, the display may turn off normally. Keep closed-lid laptops properly ventilated.
+**Modern Standby on battery:** active battery protection may keep the display logically on and increase battery use. On AC, the display may turn off normally. Keep closed-lid laptops ventilated.
 
-**The optional machine-inactivity override affects automatic locking for all signed-in users.** After an abnormal exit or power loss, that setting can remain changed across reboot until the original account relaunches the app and approves restoration. Read [the recovery warning](docs/SAFETY.md#machine-wide-inactivity-and-recovery) before enabling it, particularly on shared or managed computers.
+**Automatic locking:** the optional machine-inactivity override affects all signed-in users. After an abnormal exit or power loss, automatic locking can remain changed across reboot until the original account relaunches the app and approves restoration. Read [Safety and recovery](docs/SAFETY.md) before using it on shared or managed computers.
 
-The release is **unsigned**. Compatibility on one tested endpoint does not certify every antivirus or EDR configuration. Do not disable security software or bypass a detection to run it. Do not delete pending recovery data to clear an error.
+**Security and shutdown:** the app is unsigned. Do not bypass antivirus/EDR detections. Forced shutdowns and every Windows Update deadline cannot be guaranteed to be blocked. Do not delete pending recovery data to clear an error.
 
-## Documentation and source
+## Help and source
 
-- **Using the app:** [setup, updating, diagnostics, and troubleshooting](docs/USAGE.md).
-- **Understanding the safeguards:** [battery, permissions, shutdown limits, and recovery](docs/SAFETY.md).
-- **Working on the project:** [build and test guide](docs/DEVELOPMENT.md), [contributing](CONTRIBUTING.md), and the [documentation index](docs/README.md).
+[User guide](docs/USAGE.md) · [Safety and recovery](docs/SAFETY.md) · [Changelog](CHANGELOG.md) · [Report a problem](https://github.com/bohanyt/windows_no_sleep/issues)
 
-Application source is in `native/`; `legacy/` is historical reference material, not the current app. Maintainer status and development history are kept out of the user guide: see [current project status](docs/CURRENT.md) and [the archive index](docs/archive/README.md).
+Application source and tests are in `native/`. See [Building and testing](docs/DEVELOPMENT.md) and [Contributing](CONTRIBUTING.md) to work on the project.
