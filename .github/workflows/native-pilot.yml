@@ -109,7 +109,7 @@ jobs:
             "- Actions run ID: $env:GITHUB_RUN_ID"
             "- Runner image: $runnerOs / $imageOs / $imageVersion"
             "- MSBuild version: $msbuildVersion"
-            'Signing: unsigned 1.0.0.0 release candidate. Functional logic follows the accepted 0.4.7 lineage. Exact-hash physical acceptance does not transfer to this candidate.'
+            'Signing: unsigned 1.0.1.0 release candidate. Adds Group Policy refresh re-assertion of the machine-inactivity override to the accepted 0.4.7 lineage. Exact-hash physical acceptance does not transfer to this candidate.'
           ) | Add-Content $env:GITHUB_STEP_SUMMARY
           @(
             "Source SHA: $env:GITHUB_SHA"
@@ -151,8 +151,8 @@ jobs:
           }
           $notesPath = '.\artifacts\dev-release-notes.txt'
           if (-not (Test-Path $notesPath)) { throw 'Development release notes are missing.' }
-          $notes = ((Get-Content $notesPath -Raw).Trim() + "`n`nNative V1 1.0.0.0 release candidate. Automated checks passed. Functional logic is unchanged from the accepted 0.4.7 lineage. This hash is not yet exact-artifact physical acceptance. Stable v1.0.0 is not published. Unsigned.")
-          gh release create dev-latest "$out\WindowsNoSleep.exe" "$out\WindowsNoSleep.exe.config" "$out\README.txt" "$out\SHA256SUMS.txt" "$out\BUILD_SHA.txt" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'Windows No Sleep 1.0.0.0 release candidate' --notes $notes --prerelease --draft
+          $notes = ((Get-Content $notesPath -Raw).Trim() + "`n`nNative V1 1.0.1.0 release candidate. Automated checks passed. Adds Group Policy refresh re-assertion of the machine-inactivity override; that path is not yet physically accepted. This hash is not yet exact-artifact physical acceptance. Unsigned.")
+          gh release create dev-latest "$out\WindowsNoSleep.exe" "$out\WindowsNoSleep.exe.config" "$out\README.txt" "$out\SHA256SUMS.txt" "$out\BUILD_SHA.txt" --repo "$env:GITHUB_REPOSITORY" --target "$env:GITHUB_SHA" --title 'Windows No Sleep 1.0.1.0 release candidate' --notes $notes --prerelease --draft
           if ($LASTEXITCODE -ne 0) { throw 'Failed to stage the complete release.' }
           gh release edit dev-latest --repo "$env:GITHUB_REPOSITORY" --draft=false --latest=false
           if ($LASTEXITCODE -ne 0) { throw 'Failed to publish the complete release.' }

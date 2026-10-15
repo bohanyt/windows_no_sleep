@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Fixed protection stopping after about 16 hours on domain-joined PCs: when Windows re-applies security policy and restores the original machine-inactivity limit, the app re-asserts its temporary override through the already-approved broker without another UAC prompt. It stops re-asserting after 6 re-applications within an hour or if any other value appears, and screensaver suppression now stays active when only the machine-inactivity override stops.
+- Session locks are logged even after protection has stopped.
 - Simplified the public documentation and removed obsolete reference files from the current repository tree. No application behavior or published download changed.
 
 ## 1.0.0 — 2026-09-25

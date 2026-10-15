@@ -56,6 +56,7 @@ namespace WindowsNoSleep
         bool IsElevated { get; }
         MachineInactivityState ReadMachineInactivity();
         void SetMachineInactivity(uint seconds);
+        bool TryReassertOverride(uint original);
     }
     internal interface IMachineInactivityStore
     {
@@ -108,9 +109,12 @@ namespace WindowsNoSleep
         private readonly IMachineInactivityPlatform _machine;
         private readonly IMachineInactivityStore _machineStore;
         private readonly Action<string> _log;
-        private string _profile, _lockObserved;
+        private readonly Func<DateTime> _utcNow;
+        private readonly List<DateTime> _reassertTimes = new List<DateTime>();
+        private string _profile, _lockObserved, _machineWarning;
         private bool _machineActive, _administratorDenied;
         private uint _machineOriginal;
+        private const int ReassertWindowMinutes = 60, ReassertMaxPerWindow = 6;
         internal bool RecoveryReady = true;
         internal string RecoveryError;
         public bool Active { get; private set; }
@@ -125,14 +129,15 @@ namespace WindowsNoSleep
         public string Warning { get; private set; }
         public string Detail { get; private set; }
         internal ScreenSaverProtection(IScreenSaverPlatform platform, IScreenSaverStore store, Action<string> log,
-            IMachineInactivityPlatform machine = null, IMachineInactivityStore machineStore = null)
+            IMachineInactivityPlatform machine = null, IMachineInactivityStore machineStore = null, Func<DateTime> utcNow = null)
         {
             _platform = platform; _store = store; _log = log; _machine = machine; _machineStore = machineStore;
+            _utcNow = utcNow ?? (() => DateTime.UtcNow);
             Detail = "Not started";
         }
         public void Start(bool enabled)
         {
-            Restore(); Warning = null; _lockObserved = null; _machineActive = false; _machineOriginal = 0;
+            Restore(); Warning = null; _lockObserved = null; _machineWarning = null; _machineActive = false; _machineOriginal = 0; _reassertTimes.Clear();
             if (!enabled) { Detail = "Off - screensaver and automatic-lock settings follow Windows"; return; }
             try
             {
@@ -226,25 +231,34 @@ namespace WindowsNoSleep
             if (!Active) return;
             try
             {
-                var state = _platform.Read();
                 if (_machineActive && _machine != null)
                 {
                     var machineState = _machine.ReadMachineInactivity();
-                    if (!machineState.Exists || machineState.Seconds != 0)
+                    if (!machineState.Exists || (machineState.Seconds != 0 && machineState.Seconds != _machineOriginal))
+                        StopMachineInactivity("Windows machine inactivity policy changed outside this app; the temporary override stopped.");
+                    else if (machineState.Seconds == _machineOriginal)
                     {
-                        Restore();
-                        Warning = "Windows machine inactivity policy changed outside this app; the temporary override stopped.";
-                        Detail = "Unavailable - " + Warning;
-                        return;
+                        var cutoff = _utcNow().AddMinutes(-ReassertWindowMinutes);
+                        _reassertTimes.RemoveAll(time => time < cutoff);
+                        if (_reassertTimes.Count >= ReassertMaxPerWindow)
+                            StopMachineInactivity("Windows policy keeps re-applying the inactivity limit; the temporary override stopped.");
+                        else if (!_machine.TryReassertOverride(_machineOriginal))
+                            StopMachineInactivity("Windows machine inactivity policy changed outside this app; the temporary override stopped.");
+                        else
+                        {
+                            _reassertTimes.Add(_utcNow());
+                            _log("MACHINE_INACTIVITY_REASSERTED original=" + _machineOriginal + " count=" + _reassertTimes.Count);
+                        }
                     }
                 }
+                var state = _platform.Read();
                 if (state.Enabled || state.ProfileStamp != _profile || (state.SettingsManaged && Pending))
                 {
                     Restore();
                     Warning = "Screensaver settings changed outside this app; suppression stopped. Check Windows settings.";
                     Detail = "Unavailable - " + Warning;
                 }
-                else Warning = Join(state.LockWarning, _lockObserved);
+                else Warning = Join(Join(_machineWarning, state.LockWarning), _lockObserved);
             }
             catch (Exception error)
             {
@@ -254,10 +268,18 @@ namespace WindowsNoSleep
         }
         internal void ObserveSessionLock()
         {
+            _log("SESSION_LOCK_OBSERVED screensaverSuppressed=" + Active + " cause=unknown_manual_or_OS");
             if (!Active) return;
             _lockObserved = "Windows locked this session (manual or another trigger). Automatic-lock prevention is not verified.";
             Warning = Join(Warning, _lockObserved);
-            _log("SESSION_LOCK_OBSERVED screensaverSuppressed=" + Active + " cause=unknown_manual_or_OS");
+        }
+        private void StopMachineInactivity(string warning)
+        {
+            _machineWarning = warning;
+            Detail = "Active - ordinary screensaver prevented; local machine inactivity protection is not active";
+            _log("MACHINE_INACTIVITY_OVERRIDE_STOPPED reason=" + warning);
+            try { RestoreMachineInactivity(); }
+            catch (Exception error) { _machineActive = false; _machineWarning = Join(warning, error.Message); }
         }
         public void Restore()
         {
@@ -411,6 +433,7 @@ namespace WindowsNoSleep
         private Process _brokerProcess;
         private EventWaitHandle _brokerRestoreEvent;
         private EventWaitHandle _brokerReadyEvent;
+        private EventWaitHandle _brokerRearmEvent;
         // Microsoft: SystemParametersInfoW / SPI_GETSCREENSAVEACTIVE (0x10),
         // SPI_SETSCREENSAVEACTIVE (0x11), fWinIni=0 leaves the user profile intact.
         // https://learn.microsoft.com/windows/win32/api/winuser/nf-winuser-systemparametersinfow
@@ -502,6 +525,30 @@ namespace WindowsNoSleep
                 return new MachineInactivityState { Exists = true, Seconds = (uint)number };
             }
         }
+        public bool TryReassertOverride(uint original)
+        {
+            if (original == 0) return false;
+            var before = ReadMachineInactivity();
+            if (!before.Exists || before.Seconds != original) return false;
+            if (IsElevated)
+            {
+                WriteMachineInactivity(0);
+                var after = ReadMachineInactivity();
+                return after.Exists && after.Seconds == 0;
+            }
+            CleanupExitedBroker();
+            if (_brokerProcess == null || _brokerProcess.HasExited || _brokerRearmEvent == null) return false;
+            try { _brokerRearmEvent.Set(); }
+            catch { return false; }
+            DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+            while (DateTime.UtcNow < deadline)
+            {
+                var state = ReadMachineInactivity();
+                if (state.Exists && state.Seconds == 0) return true;
+                Thread.Sleep(100);
+            }
+            return false;
+        }
         public void SetMachineInactivity(uint seconds)
         {
             if (IsElevated)
@@ -533,14 +580,17 @@ namespace WindowsNoSleep
             string nonce = Guid.NewGuid().ToString("N");
             string restoreName = @"Local\WindowsNoSleep-MachineRestore-" + nonce;
             string readyName = @"Local\WindowsNoSleep-MachineReady-" + nonce;
+            string rearmName = @"Local\WindowsNoSleep-MachineRearm-" + nonce;
             _brokerRestoreEvent = CreateCrossUserEvent(restoreName);
             _brokerReadyEvent = CreateCrossUserEvent(readyName);
+            _brokerRearmEvent = CreateCrossUserEvent(rearmName, EventResetMode.AutoReset);
 
             string executable = Process.GetCurrentProcess().MainModule.FileName;
             string arguments = "--machine-inactivity-broker "
                 + Process.GetCurrentProcess().Id.ToString(System.Globalization.CultureInfo.InvariantCulture) + " "
                 + restoreName + " " + readyName + " "
-                + before.Seconds.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                + before.Seconds.ToString(System.Globalization.CultureInfo.InvariantCulture) + " "
+                + rearmName;
             try
             {
                 _brokerProcess = Process.Start(new ProcessStartInfo(executable, arguments)
@@ -632,13 +682,13 @@ namespace WindowsNoSleep
                 throw;
             }
         }
-        private static EventWaitHandle CreateCrossUserEvent(string name)
+        private static EventWaitHandle CreateCrossUserEvent(string name, EventResetMode mode = EventResetMode.ManualReset)
         {
             var security = new EventWaitHandleSecurity();
             var world = new SecurityIdentifier(WellKnownSidType.WorldSid, null);
             security.AddAccessRule(new EventWaitHandleAccessRule(world, EventWaitHandleRights.FullControl, AccessControlType.Allow));
             bool created;
-            return new EventWaitHandle(false, EventResetMode.ManualReset, name, out created, security);
+            return new EventWaitHandle(false, mode, name, out created, security);
         }
         private void CleanupExitedBroker()
         {
@@ -648,6 +698,7 @@ namespace WindowsNoSleep
         {
             if (_brokerRestoreEvent != null) { _brokerRestoreEvent.Dispose(); _brokerRestoreEvent = null; }
             if (_brokerReadyEvent != null) { _brokerReadyEvent.Dispose(); _brokerReadyEvent = null; }
+            if (_brokerRearmEvent != null) { _brokerRearmEvent.Dispose(); _brokerRearmEvent = null; }
             if (_brokerProcess != null) { _brokerProcess.Dispose(); _brokerProcess = null; }
         }
         internal static int RunMachineInactivityHelper(string value)
@@ -665,7 +716,7 @@ namespace WindowsNoSleep
             }
             catch { return 1; }
         }
-        internal static int RunMachineInactivityBroker(string parentValue, string restoreName, string readyName, string originalValue)
+        internal static int RunMachineInactivityBroker(string parentValue, string restoreName, string readyName, string originalValue, string rearmName)
         {
             int parentId;
             uint original;
@@ -673,7 +724,8 @@ namespace WindowsNoSleep
                     System.Globalization.CultureInfo.InvariantCulture, out parentId)
                 || !uint.TryParse(originalValue, System.Globalization.NumberStyles.None,
                     System.Globalization.CultureInfo.InvariantCulture, out original)
-                || original == 0 || string.IsNullOrWhiteSpace(restoreName) || string.IsNullOrWhiteSpace(readyName))
+                || original == 0 || string.IsNullOrWhiteSpace(restoreName) || string.IsNullOrWhiteSpace(readyName)
+                || string.IsNullOrWhiteSpace(rearmName))
                 return 64;
 
             EventWaitHandle ready = null;
@@ -682,6 +734,7 @@ namespace WindowsNoSleep
                 var platform = new WindowsScreenSaverPlatform();
                 if (!platform.IsElevated) return 5;
                 using (var restore = EventWaitHandle.OpenExisting(restoreName))
+                using (var rearm = EventWaitHandle.OpenExisting(rearmName))
                 {
                     ready = EventWaitHandle.OpenExisting(readyName);
                     var before = platform.ReadMachineInactivity();
@@ -691,9 +744,22 @@ namespace WindowsNoSleep
                     if (!active.Exists || active.Seconds != 0) return 3;
                     ready.Set();
 
+                    var handles = new WaitHandle[] { restore, rearm };
                     while (true)
                     {
-                        if (restore.WaitOne(500)) break;
+                        int signaled = WaitHandle.WaitAny(handles, 500);
+                        if (signaled == 0) break;
+                        if (signaled == 1)
+                        {
+                            var snapshot = platform.ReadMachineInactivity();
+                            if (snapshot.Exists && snapshot.Seconds == original)
+                            {
+                                platform.WriteMachineInactivity(0);
+                                var verify = platform.ReadMachineInactivity();
+                                if (!verify.Exists || verify.Seconds != 0) return 10;
+                            }
+                            continue;
+                        }
                         try
                         {
                             using (var parent = Process.GetProcessById(parentId))

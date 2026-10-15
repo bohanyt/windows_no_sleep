@@ -24,6 +24,8 @@ Ordinary screensaver suppression and the separately permission-gated machine-ina
 
 After explicit UAC approval, a bounded elevated broker holds responsibility for restoring the exact original inactivity value. It is intended to restore the value and exit when the main app disappears. Normal Stop/Exit uses the already-approved broker for restoration.
 
+On domain-joined PCs, Windows can re-apply security policy about every 16 hours (or more often when IT forces Group Policy processing), which may rewrite the recorded original value. While Protection stays active, the app re-asserts the temporary override through the already-approved broker without another UAC, keeps the recovery record for restoration, and stops re-asserting after repeated re-application within an hour.
+
 **Restoration is not guaranteed after every abnormal exit.** Power loss, security software terminating the broker, an unclean session end, or an elevated main app without a surviving broker can leave machine-wide inactivity auto-lock disabled across reboot for all users. Nothing can execute a restore while power is absent.
 
 The recovery record is bound to the original account in `%LOCALAPPDATA%`. Another account does not automatically repair it. The original account must relaunch Windows No Sleep and approve the one-shot administrator restore helper to restore the recorded original. Automatic startup is off by default, so that recovery may not happen until the account launches the app.
