@@ -18,7 +18,7 @@ The **Source code** archives are for developers, not prebuilt application packag
 
 [Verify the download](#verify-a-download), then launch the EXE. Protection starts in the tray. Click its icon for Settings. Closing Settings leaves the app running. **Stop Protection** releases protection; tray **Exit** quits and attempts verified restoration. A duplicate launch shows a short notice instead of creating another protection owner.
 
-Read [the machine-wide inactivity warning](SAFETY.md#machine-wide-inactivity-and-recovery) before enabling that option, especially on shared or managed computers. Its UAC prompt is not a reason to run the whole app as administrator.
+Read [the machine-wide inactivity warning](SAFETY.md#machine-wide-inactivity-and-recovery) before enabling that option, especially on shared or managed computers. Its UAC prompt is not a reason to run the whole app as administrator. On domain-joined PCs, Windows may re-apply that policy periodically; the app re-asserts the override through the approved broker without another prompt until it gives up after repeated re-application.
 
 ## Verify a download
 

@@ -14,7 +14,7 @@ namespace WindowsNoSleep
         private sealed class Desktop : IScreenSaverPlatform, IMachineInactivityPlatform
         {
             internal bool Enabled = true, Managed, IgnoreWrite, ThrowAfterDisable, FailRestore;
-            internal bool Elevated, MachineExists, FailMachineWrite, FailMachineRestore, CancelElevation;
+            internal bool Elevated, MachineExists, FailMachineWrite, FailMachineRestore, CancelElevation, ReassertAvailable = true;
             internal uint MachineSeconds;
             internal string Stamp = "profile-unchanged", UserId = "test-user", LogonId = "test-logon", LockWarning;
             internal int Writes, MachineWrites, MachineAttempts;
@@ -53,6 +53,11 @@ namespace WindowsNoSleep
                 if (seconds != 0 && FailMachineRestore) throw new IOException("machine restore failed");
                 MachineWrites++; Trace.Add("machine=" + seconds);
                 MachineExists = true; MachineSeconds = seconds;
+            }
+            public bool TryReassertOverride(uint original)
+            {
+                if (!ReassertAvailable || !MachineExists || MachineSeconds != original) return false;
+                MachineWrites++; Trace.Add("reassert"); MachineSeconds = 0; return true;
             }
         }
         private sealed class MachineStore : IMachineInactivityStore
@@ -99,14 +104,15 @@ namespace WindowsNoSleep
             internal readonly Desktop Desktop = new Desktop();
             internal readonly Store Store;
             internal readonly MachineStore MachineStore;
+            internal readonly List<string> Logs = new List<string>();
             internal readonly ScreenSaverProtection Protection;
             internal Rig()
             {
                 Store = new Store(Desktop.Trace); MachineStore = new MachineStore(Desktop.Trace); Protection = NewProtection();
             }
-            internal ScreenSaverProtection NewProtection()
+            internal ScreenSaverProtection NewProtection(Func<DateTime> utcNow = null)
             {
-                return new ScreenSaverProtection(Desktop, Store, delegate { }, Desktop, MachineStore);
+                return new ScreenSaverProtection(Desktop, Store, Logs.Add, Desktop, MachineStore, utcNow);
             }
         }
         private sealed class Sensor : IPowerSensor
@@ -258,6 +264,51 @@ namespace WindowsNoSleep
                 var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
                 r.Protection.Start(true); r.Desktop.MachineSeconds = 600; Throws(r.Protection.Restore);
                 Assert(r.MachineStore.Exists && r.Desktop.MachineSeconds == 600);
+            });
+            test("group policy refresh of original machine inactivity is reasserted", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true); r.Desktop.MachineSeconds = 900; r.Protection.Poll();
+                Assert(r.Protection.Active && r.Desktop.MachineSeconds == 0 && r.MachineStore.Exists && r.Protection.Warning == null);
+                Assert(r.Logs.Any(line => line.StartsWith("MACHINE_INACTIVITY_REASSERTED original=900 count=1")));
+                r.Protection.Poll(); Assert(r.Protection.Warning == null && r.Logs.Count(line => line.StartsWith("MACHINE_INACTIVITY_REASSERTED")) == 1);
+                r.Protection.Restore();
+                Assert(r.Desktop.MachineSeconds == 900 && !r.MachineStore.Exists);
+            });
+            test("foreign machine inactivity poll stops override only", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true); int writes = r.Desktop.Writes; r.Desktop.MachineSeconds = 600; r.Protection.Poll();
+                Assert(r.Protection.Active && !r.Desktop.Enabled && r.Protection.Warning.Contains("changed outside")
+                    && r.Desktop.Writes == writes && r.MachineStore.Exists && r.Desktop.MachineSeconds == 600);
+                r.Protection.Poll(); Assert(r.Protection.Active && r.Protection.Warning.Contains("changed outside"));
+            });
+            test("reassert unavailable stops machine override only", delegate
+            {
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                r.Protection.Start(true); r.Desktop.ReassertAvailable = false; r.Desktop.MachineSeconds = 900; r.Protection.Poll();
+                Assert(r.Protection.Active && !r.Desktop.Enabled && r.Protection.Warning.Contains("changed outside")
+                    && !r.MachineStore.Exists && r.Desktop.MachineSeconds == 900);
+                r.Protection.Poll(); Assert(r.Protection.Warning.Contains("changed outside") && r.Desktop.MachineSeconds == 900);
+            });
+            test("machine inactivity reassert rate limit stops override", delegate
+            {
+                var anchor = new DateTime(2026, 10, 14, 0, 0, 0, DateTimeKind.Utc);
+                int step = 0;
+                var r = new Rig(); r.Desktop.MachineExists = true; r.Desktop.MachineSeconds = 900; r.Desktop.Elevated = true;
+                var protection = r.NewProtection(() => anchor.AddMinutes(step));
+                protection.Start(true);
+                for (int i = 0; i < 6; i++) { r.Desktop.MachineSeconds = 900; step = i + 1; protection.Poll(); }
+                Assert(r.Desktop.MachineSeconds == 0);
+                r.Desktop.MachineSeconds = 900; step = 7; protection.Poll();
+                Assert(protection.Active && !r.Desktop.Enabled && protection.Warning.Contains("keeps re-applying")
+                    && !r.MachineStore.Exists && r.Desktop.MachineSeconds == 900);
+                step = 8; protection.Poll(); Assert(protection.Warning.Contains("keeps re-applying") && r.Desktop.MachineSeconds == 900);
+            });
+            test("session lock logged while protection inactive", delegate
+            {
+                var r = new Rig(); r.Protection.ObserveSessionLock();
+                Assert(r.Logs.Any(line => line.Contains("SESSION_LOCK_OBSERVED") && line.Contains("screensaverSuppressed=False")));
             });
             test("successor restores machine inactivity before applying a new session", delegate
             {

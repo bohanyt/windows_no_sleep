@@ -29,7 +29,7 @@ https://github.com/bohanyt/windows_no_sleep/releases/latest
 
 ## Machine-wide automatic-lock warning
 
-The optional machine-inactivity override changes InactivityTimeoutSecs for ALL signed-in users/sessions. Use it only where you are authorized to change automatic-lock behavior. After explicit UAC approval, an elevated broker is intended to restore the exact original value on Stop/Exit or when the main app disappears.
+The optional machine-inactivity override changes InactivityTimeoutSecs for ALL signed-in users/sessions. Use it only where you are authorized to change automatic-lock behavior. After explicit UAC approval, an elevated broker is intended to restore the exact original value on Stop/Exit or when the main app disappears. Domain Group Policy may re-apply the original value periodically; the app re-asserts the override through that broker without a new UAC until repeated re-application within an hour.
 
 Power loss, security software terminating the broker, an unclean session end, or an elevated main app without a surviving broker can leave automatic locking disabled across reboot for all users. The recovery record belongs to the original account in %LOCALAPPDATA%; another account does not automatically repair it. The original account must relaunch Windows No Sleep and approve the administrator restore helper. Startup is OFF by default, so this may wait until that account launches the app.
 
